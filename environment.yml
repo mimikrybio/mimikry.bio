@@ -1,0 +1,11 @@
+name: Mimicry
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python
+  - numpy
+  - numba
+  - pillow
+  - ffmpeg
+  - git
