@@ -15,13 +15,11 @@ from datetime import datetime
 
 """ ToDo's
     - Add 'layer_images' functionatity
-    - Restructure so that eden is called wie 'python mimikry.py eden -i etc.'
     - Add game of life algorithm
     - Add smoothing function
     - Add non-linear video time
     - Add video start, where prompt is typed
     - Add linger to end of video
-    - Come up with a solution for how files and videos should be saved
 """
 
 
@@ -45,6 +43,7 @@ class EdenConfig:
     sig_steepness: float
     sig_midpoint: float
     color_palette: str
+    background_color: str
 
     COLOR_PALETTES: ClassVar[dict[str, list[list[int]]]] = {
         "grayscale": [[0, 0, 0, 255], [255, 255, 255, 255]],
@@ -52,6 +51,13 @@ class EdenConfig:
         "ocean": [[0, 0, 50, 255], [0, 150, 255, 255], [200, 255, 255, 255]],
         "neon": [[20, 0, 40, 255], [255, 0, 255, 255], [0, 255, 255, 255]],
         "circuit": [[10, 30, 15, 255], [0, 160, 70, 255], [215, 175, 55, 255]],
+    }
+
+    BG_COLORS: ClassVar[dict[str, list[int]]] = {
+        "transparent_black": [0, 0, 0, 0],
+        "black": [0, 0, 0, 255],
+        "white": [255, 255, 255, 255],
+        "transparent_white": [255, 255, 255, 0],
     }
 
     def __post_init__(self):
@@ -72,10 +78,18 @@ class EdenConfig:
             raise ValueError(
                 f"Fatal: Invalid palette '{self.color_palette}'. Valid options: {valid_keys}"
             )
+        if self.background_color not in self.BG_COLORS:
+            valid_keys = list(self.BG_COLORS.keys())
+            raise ValueError(
+                f"Fatal: Invalid background '{self.background_color}'. Valid options: {valid_keys}"
+            )
 
     def get_palette_array(self) -> np.ndarray:
         """Returns the Numba-ready NumPy array for this configuration's palette."""
         return np.array(self.COLOR_PALETTES[self.color_palette], dtype=np.uint8)
+
+    def get_background_array(self) -> np.ndarray:
+        return np.array(self.BG_COLORS[self.background_color], dtype=np.uint8)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -103,6 +117,9 @@ class EdenFactory:
         "color_palette": lambda rng: str(
             rng.choice(list(EdenConfig.COLOR_PALETTES.keys()))
         ),
+        "background_color": lambda rng: str(
+            rng.choice(list(EdenConfig.BG_COLORS.keys()))
+        ),
     }
 
     @classmethod
@@ -119,7 +136,14 @@ class EdenFactory:
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Eden Growth Model Generative Engine")
+    parser = argparse.ArgumentParser(description="Mimikry Generative Art Engine")
+
+    parser.add_argument(
+        "algorithm",
+        type=str,
+        choices=["eden"],
+        help="The specific generative algorithm to run.",
+    )
 
     parser.add_argument(
         "-b",
@@ -162,9 +186,29 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
     override_group = parser.add_argument_group("Parameter Overrides (Locks)")
     for f in fields(EdenConfig):
-        override_group.add_argument(
-            f"--{f.name}", type=str, default=None, help=f"Lock the {f.name} parameter."
-        )
+        if f.name == "background_color":
+            override_group.add_argument(
+                f"--{f.name}",
+                type=str,
+                choices=list(EdenConfig.BG_COLORS.keys()),
+                default=None,
+                help=f"Lock the {f.name} parameter. (Defaults to transparent_black for new generations)",
+            )
+        elif f.name == "color_palette":
+            override_group.add_argument(
+                f"--{f.name}",
+                type=str,
+                choices=list(EdenConfig.COLOR_PALETTES.keys()),
+                default=None,
+                help=f"Lock the {f.name} parameter.",
+            )
+        else:
+            override_group.add_argument(
+                f"--{f.name}",
+                type=str,
+                default=None,
+                help=f"Lock the {f.name} parameter.",
+            )
 
     video_group = parser.add_argument_group("Video Rendering Options")
     video_group.add_argument(
@@ -249,6 +293,7 @@ def run_eden(
     task_rng = np.random.default_rng(config.simulation_seed)
     canvas = np.zeros((config.height, config.width), dtype=np.uint32)
     color_palette = config.get_palette_array()
+    background_color = config.get_background_array()
     color_buffer = np.zeros(
         (config.height, config.width, color_palette.shape[1]), dtype=np.uint8
     )
@@ -289,7 +334,7 @@ def run_eden(
                 config.sig_steepness,
                 config.sig_midpoint,
             )
-            renderer.apply_shader(norm_c, color_palette, color_buffer)
+            renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
             process.stdin.write(color_buffer.tobytes())  # type: ignore
 
     if to_video and process:
@@ -304,7 +349,7 @@ def run_eden(
             config.sig_midpoint,
         )
 
-        renderer.apply_shader(norm_c, color_palette, color_buffer)
+        renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
         output_filepath = os.path.join(batch_directory, f"{config.simulation_seed}.png")
         renderer.save_static_image(output_filepath, color_buffer, config.to_json())
 
@@ -688,17 +733,18 @@ def validate_execution(
 
 if __name__ == "__main__":
     parsed_args = parse_args()
-    if parsed_args.show_metadata and parsed_args.image:
-        show_metadata(parsed_args.image)
-        exit(0)
-    locked_parameters = extract_locks(parsed_args)
-    main(
-        batch_size=parsed_args.batch_size,
-        master_seed=parsed_args.master_seed,
-        image_filepath=parsed_args.image,
-        unlocked_parameters=parsed_args.unlock,
-        locked_parameters=locked_parameters,
-        to_video=parsed_args.to_video,
-        duration=parsed_args.duration,
-        fps=parsed_args.fps,
-    )
+    if parsed_args.algorithm == "eden":
+        if parsed_args.show_metadata and parsed_args.image:
+            show_metadata(parsed_args.image)
+            exit(0)
+        locked_parameters = extract_locks(parsed_args)
+        main(
+            batch_size=parsed_args.batch_size,
+            master_seed=parsed_args.master_seed,
+            image_filepath=parsed_args.image,
+            unlocked_parameters=parsed_args.unlock,
+            locked_parameters=locked_parameters,
+            to_video=parsed_args.to_video,
+            duration=parsed_args.duration,
+            fps=parsed_args.fps,
+        )

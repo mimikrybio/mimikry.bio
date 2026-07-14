@@ -36,7 +36,10 @@ def normalize(
 
 @njit(fastmath=True, cache=True)  # type: ignore
 def apply_shader(
-    norm_c: NDArray[np.float32], palette: NDArray[np.uint8], out: NDArray[np.uint8]
+    norm_c: NDArray[np.float32],
+    palette: NDArray[np.uint8],
+    background_color: NDArray[np.uint8],
+    out: NDArray[np.uint8],
 ) -> None:
     h, w = norm_c.shape
     colors, chans = palette.shape
@@ -72,9 +75,9 @@ def apply_shader(
                     out[y, x, c] = int(
                         pal[idx, c] + (pal[idx + 1, c] - pal[idx, c]) * frac
                     )
-            # else:
-            #     for c in range(chans):
-            #         out[y, x, c] = palette[0, c]
+            else:
+                for c in range(chans):
+                    out[y, x, c] = background_color[c]
 
 
 def save_static_image(filepath: str, color_buffer: NDArray[np.uint8], config_json: str):
