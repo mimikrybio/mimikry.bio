@@ -5,12 +5,13 @@ import concurrent.futures
 from numpy.random import Generator
 from dataclasses import dataclass, asdict, fields, replace
 import json
-from PIL.PngImagePlugin import PngInfo
 from typing import Callable, Any, ClassVar
 import argparse
 from PIL import Image
 import renderer
 from itertools import repeat
+import os
+from datetime import datetime
 
 """ ToDo's
     - Add 'layer_images' functionatity
@@ -201,6 +202,10 @@ def main(
     tasks = range(batch_size)
     locked_params = locked_parameters or {}
 
+    timestamp = datetime.now().strftime("%d%m%Y%H%M%S")
+    batch_directory = f"batch_{timestamp}"
+    os.makedirs(batch_directory, exist_ok=True)
+
     master_rng = np.random.default_rng(master_seed)
 
     if image_filepath:
@@ -222,7 +227,13 @@ def main(
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = executor.map(
-            run_eden, tasks, configs, repeat(to_video), repeat(duration), repeat(fps)
+            run_eden,
+            tasks,
+            configs,
+            repeat(to_video),
+            repeat(duration),
+            repeat(fps),
+            repeat(batch_directory),
         )
         list(results)
 
@@ -233,6 +244,7 @@ def run_eden(
     to_video: bool,
     duration: float,
     fps: int,
+    batch_directory: str,
 ):
     task_rng = np.random.default_rng(config.simulation_seed)
     canvas = np.zeros((config.height, config.width), dtype=np.uint32)
@@ -247,7 +259,7 @@ def run_eden(
     if to_video:
         total_frames = int(duration * fps)
         capture_interval = max(1, config.iterations // total_frames)
-        output_filepath = f"eden_growth_{config.simulation_seed}.mp4"
+        output_filepath = os.path.join(batch_directory, f"{config.simulation_seed}.mp4")
         process = renderer.initialize_video_stream(
             config.width, config.height, fps, output_filepath
         )
@@ -270,7 +282,7 @@ def run_eden(
 
     for status in eden_generator:
         if to_video and status in (0, 1) and process:
-            norm_c = normalize(
+            norm_c = renderer.normalize(
                 canvas,
                 config.norm_method,
                 config.norm_power,
@@ -284,7 +296,7 @@ def run_eden(
         process.stdin.close()  # type: ignore
         process.wait()
     else:
-        norm_c = normalize(
+        norm_c = renderer.normalize(
             canvas,
             config.norm_method,
             config.norm_power,
@@ -293,7 +305,8 @@ def run_eden(
         )
 
         renderer.apply_shader(norm_c, color_palette, color_buffer)
-        renderer.save_static_image(f"test_{i}.png", color_buffer, config.to_json())
+        output_filepath = os.path.join(batch_directory, f"{config.simulation_seed}.png")
+        renderer.save_static_image(output_filepath, color_buffer, config.to_json())
 
 
 @njit(cache=True)  # type: ignore
@@ -539,34 +552,6 @@ def build_shader(
 
 
 @njit(cache=True)  # type: ignore
-def normalize(
-    canvas: NDArray[np.uint32],
-    method: int,
-    power: float,
-    steepness: float,
-    midpoint: float,
-) -> NDArray[np.float32]:
-    max_val = canvas.max()
-    if max_val == 0:
-        return canvas.astype(np.float32)
-    if method == 2:
-        log_max = np.log1p(max_val)
-        normalized_canvas = np.log1p(canvas) / log_max
-    else:
-        normalized_canvas = canvas / max_val
-        if method == 1:
-            normalized_canvas = normalized_canvas**power
-        elif method == 3:
-            sig = 1.0 / (1.0 + np.exp(-steepness * (normalized_canvas - midpoint)))
-            sig_min = sig.min()
-            sig_max = sig.max()
-            if sig_min == sig_max:
-                return normalized_canvas.astype(np.float32)
-            normalized_canvas = (sig - sig_min) / (sig_max - sig_min)
-    return normalized_canvas.astype(np.float32)
-
-
-@njit(cache=True)  # type: ignore
 def build_minkowski_mask(radius: int, power: float) -> NDArray[np.int32]:
     size = radius * 2 + 1
     kernel = np.zeros((size, size), dtype=np.int32)
@@ -623,12 +608,6 @@ def precompute_static_fitness(
                 ) ** bias_power
 
     return fitness_map
-
-
-def draw(filepath: str, canvas: NDArray[np.uint8], config: EdenConfig):
-    meta_data = PngInfo()
-    meta_data.add_text("EdenConfig", config.to_json())
-    Image.fromarray(canvas).save(filepath, pnginfo=meta_data)
 
 
 def extract_locks(parsed_args: argparse.Namespace) -> dict[str, Any]:
