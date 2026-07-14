@@ -16,10 +16,13 @@ from datetime import datetime
 """ ToDo's
     - Add 'layer_images' functionatity
     - Add game of life algorithm
-    - Add smoothing function
+    - Add smoothing function, apply to background image
     - Add non-linear video time
     - Add video start, where prompt is typed
     - Add linger to end of video
+    - Add option to provide json file for settings
+    - Remove magic number for smoothing function and integrate smoothing with argparse
+    - Gaussian blur instead of box?
 """
 
 
@@ -51,6 +54,7 @@ class EdenConfig:
         "ocean": [[0, 0, 50, 255], [0, 150, 255, 255], [200, 255, 255, 255]],
         "neon": [[20, 0, 40, 255], [255, 0, 255, 255], [0, 255, 255, 255]],
         "circuit": [[10, 30, 15, 255], [0, 160, 70, 255], [215, 175, 55, 255]],
+        "tree": [[92, 64, 51, 255], [52, 199, 89, 255]],
     }
 
     BG_COLORS: ClassVar[dict[str, list[int]]] = {
@@ -184,6 +188,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Parameters to unlock for mutation (e.g., -u bias minkowski_radius).",
     )
 
+    parser.add_argument(
+        "-bg",
+        "--background_image",
+        type=str,
+        default=None,
+        help="Path to a PNG file to use as the background layer.",
+    )
+
     override_group = parser.add_argument_group("Parameter Overrides (Locks)")
     for f in fields(EdenConfig):
         if f.name == "background_color":
@@ -192,7 +204,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
                 type=str,
                 choices=list(EdenConfig.BG_COLORS.keys()),
                 default=None,
-                help=f"Lock the {f.name} parameter. (Defaults to transparent_black for new generations)",
+                help=f"Lock the {f.name} parameter.",
             )
         elif f.name == "color_palette":
             override_group.add_argument(
@@ -236,6 +248,7 @@ def main(
     batch_size: int,
     master_seed: int | None = None,
     image_filepath: str | None = None,
+    background_image: str | None = None,
     unlocked_parameters: list[str] | None = None,
     locked_parameters: dict[str, Any] | None = None,
     to_video: bool = False,
@@ -278,6 +291,7 @@ def main(
             repeat(duration),
             repeat(fps),
             repeat(batch_directory),
+            repeat(background_image),
         )
         list(results)
 
@@ -289,6 +303,7 @@ def run_eden(
     duration: float,
     fps: int,
     batch_directory: str,
+    background_image: str | None,
 ):
     task_rng = np.random.default_rng(config.simulation_seed)
     canvas = np.zeros((config.height, config.width), dtype=np.uint32)
@@ -298,13 +313,18 @@ def run_eden(
         (config.height, config.width, color_palette.shape[1]), dtype=np.uint8
     )
 
+    background_array = None
+    if background_image:
+        with Image.open(background_image) as img:
+            background_array = np.array(img.convert("RGBA"), dtype=np.uint8)
+
     capture_interval = 0
     process = None
 
     if to_video:
         total_frames = int(duration * fps)
         capture_interval = max(1, config.iterations // total_frames)
-        output_filepath = os.path.join(batch_directory, f"{config.simulation_seed}.mp4")
+        output_filepath = os.path.join(batch_directory, f"{i:04d}.mp4")
         process = renderer.initialize_video_stream(
             config.width, config.height, fps, output_filepath
         )
@@ -335,6 +355,12 @@ def run_eden(
                 config.sig_midpoint,
             )
             renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
+            blurred_buffer = renderer.apply_box_blur(color_buffer, radius=0)
+            out_buffer = (
+                renderer.layer_images(blurred_buffer, background_array)
+                if background_array is not None
+                else blurred_buffer
+            )
             process.stdin.write(color_buffer.tobytes())  # type: ignore
 
     if to_video and process:
@@ -350,8 +376,14 @@ def run_eden(
         )
 
         renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
-        output_filepath = os.path.join(batch_directory, f"{config.simulation_seed}.png")
-        renderer.save_static_image(output_filepath, color_buffer, config.to_json())
+        blurred_buffer = renderer.apply_box_blur(color_buffer, radius=0)
+        out_buffer = (
+            renderer.layer_images(blurred_buffer, background_array)
+            if background_array is not None
+            else blurred_buffer
+        )
+        output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
+        renderer.save_static_image(output_filepath, out_buffer, config.to_json())
 
 
 @njit(cache=True)  # type: ignore
@@ -552,51 +584,6 @@ def update_density_map(
 
 
 @njit(cache=True)  # type: ignore
-def build_shader(
-    canvas: NDArray[np.float32], palette: NDArray[np.uint8]
-) -> NDArray[np.uint8]:
-    h = canvas.shape[0]
-    w = canvas.shape[1]
-    shader = np.zeros((h, w, 4), dtype=np.uint8)
-    palette_f = palette.astype(np.float32)
-    num_colors = palette.shape[0]
-    if num_colors == 1:
-        r, g, b = palette[0]
-        for y in range(h):
-            for x in range(w):
-                if canvas[y, x] > 0:
-                    shader[y, x, 0] = r
-                    shader[y, x, 1] = g
-                    shader[y, x, 2] = b
-                    shader[y, x, 3] = 255
-        return shader
-
-    num_segments = num_colors - 1
-    for y in range(h):
-        for x in range(w):
-            val = canvas[y, x]
-            if val > 0:
-                scaled_val = val * num_segments
-                idx = int(scaled_val)
-
-                if idx >= num_segments:
-                    idx = num_segments - 1
-                    frac = 1.0
-                else:
-                    frac = scaled_val - float(idx)
-
-                r1, g1, b1 = palette_f[idx]
-                r2, g2, b2 = palette_f[idx + 1]
-
-                shader[y, x, 0] = int(r1 + (r2 - r1) * frac)
-                shader[y, x, 1] = int(g1 + (g2 - g1) * frac)
-                shader[y, x, 2] = int(b1 + (b2 - b1) * frac)
-                shader[y, x, 3] = 255
-
-    return shader
-
-
-@njit(cache=True)  # type: ignore
 def build_minkowski_mask(radius: int, power: float) -> NDArray[np.int32]:
     size = radius * 2 + 1
     kernel = np.zeros((size, size), dtype=np.int32)
@@ -742,6 +729,7 @@ if __name__ == "__main__":
             batch_size=parsed_args.batch_size,
             master_seed=parsed_args.master_seed,
             image_filepath=parsed_args.image,
+            background_image=parsed_args.background_image,
             unlocked_parameters=parsed_args.unlock,
             locked_parameters=locked_parameters,
             to_video=parsed_args.to_video,

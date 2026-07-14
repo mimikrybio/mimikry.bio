@@ -49,20 +49,21 @@ def apply_shader(
 
     if colors == 1:
         color = palette[0]
-        for y in range(h):  # Reverted to standard range
+        for y in range(h):
             for x in range(w):
-                if norm_c[y, x] > 0.0:
+                v = norm_c[y, x]
+                if v > 0.0:
                     for c in range(chans):
                         out[y, x, c] = color[c]
                 else:
                     for c in range(chans):
-                        out[y, x, c] = 0
+                        out[y, x, c] = background_color[c]
         return
 
     pal = palette.astype(np.float32)
     segs = colors - 1
 
-    for y in range(h):  # Reverted to standard range
+    for y in range(h):
         for x in range(w):
             v = norm_c[y, x]
 
@@ -78,6 +79,50 @@ def apply_shader(
             else:
                 for c in range(chans):
                     out[y, x, c] = background_color[c]
+
+
+@njit(fastmath=True, cache=True)  # type: ignore
+def apply_box_blur(img: NDArray[np.uint8], radius: int) -> NDArray[np.uint8]:
+    h, w, c = img.shape
+    out = np.zeros_like(img)
+
+    if radius <= 0:
+        return img.copy()
+
+    for y in range(h):
+        for x in range(w):
+            for ch in range(c):
+                val = 0
+                count = 0
+                for dy in range(-radius, radius + 1):
+                    ny = y + dy
+                    if ny < 0 or ny >= h:
+                        continue
+                    for dx in range(-radius, radius + 1):
+                        nx = x + dx
+                        if nx < 0 or nx >= w:
+                            continue
+
+                        val += img[ny, nx, ch]
+                        count += 1
+
+                out[y, x, ch] = val // count
+    return out
+
+
+@njit(fastmath=True, cache=True)  # type: ignore
+def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    h, w, c = fg.shape
+    out = np.empty_like(fg)
+
+    for y in range(h):
+        for x in range(w):
+            if fg[y, x, 3] != 0:
+                for ch in range(c):
+                    val = int(fg[y, x, ch]) + int(bg[y, x, ch])
+                    out[y, x, ch] = val // 2
+
+    return out
 
 
 def save_static_image(filepath: str, color_buffer: NDArray[np.uint8], config_json: str):
