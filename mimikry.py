@@ -1,6 +1,6 @@
 import numpy as np
 import concurrent.futures
-from dataclasses import dataclass, asdict, fields, replace
+from dataclasses import dataclass, fields, replace
 import json
 from typing import Any, Callable
 import argparse
@@ -12,15 +12,11 @@ from datetime import datetime
 import algorithms.eden as eden
 
 """ ToDo's
-    - Add 'layer_images' functionatity
+    - Remove black formatter character limit per line
     - Add game of life algorithm
-    - Add smoothing function, apply to background image
     - Add non-linear video time
     - Add video start, where prompt is typed
     - Add linger to end of video
-    - Add option to provide json file for settings
-    - Remove magic number for smoothing function and integrate smoothing with argparse
-    - Gaussian blur instead of box?
     - Should color palettes be defined in renderer.py?
 """
 
@@ -30,7 +26,6 @@ class AlgorithmEntry:
     config: type[Any]
     factory: type[Any]
     runner: Callable[..., Any]
-    meta_key: str
 
 
 ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = {
@@ -38,7 +33,6 @@ ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = {
         config=eden.EdenConfig,
         factory=eden.EdenFactory,
         runner=eden.run_eden,
-        meta_key="EdenConfig",
     )
 }
 
@@ -46,9 +40,29 @@ ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = {
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     initial_parser = argparse.ArgumentParser(add_help=False)
     initial_parser.add_argument(
-        "algorithm", type=str, choices=list(ALGORITHM_REGISTRY.keys())
+        "algorithm",
+        type=str,
+        choices=list(ALGORITHM_REGISTRY.keys()),
+        nargs="?",
+        default=None,
+    )
+    initial_parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=None,
+        help="Path to a JSON configuration file.",
     )
     known_args, _ = initial_parser.parse_known_args(args)
+
+    config_defaults: dict[str, Any] = {}
+    if known_args.config:
+        with open(known_args.config, "r") as f:
+            raw_config = json.load(f)
+            if "engine" in raw_config:
+                config_defaults.update(raw_config["engine"])
+            if "algorithm" in raw_config:
+                config_defaults.update(raw_config["algorithm"])
 
     algo_key = known_args.algorithm
     target_config = ALGORITHM_REGISTRY[algo_key].config
@@ -60,6 +74,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         type=str,
         choices=list(ALGORITHM_REGISTRY.keys()),
         help="The specific generative algorithm to run.",
+    )
+
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=None,
+        help="Path to a JSON configuration file.",
     )
 
     parser.add_argument(
@@ -107,6 +129,20 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to a PNG file to use as the background layer.",
+    )
+
+    render_group = parser.add_argument_group("Rendering Options")
+    render_group.add_argument(
+        "--blur_radius",
+        type=int,
+        default=0,
+        help="Radius for the Gaussian blur. A value of 0 disables the blur.",
+    )
+    render_group.add_argument(
+        "--blur_sigma",
+        type=float,
+        default=0.0,
+        help="Sigma for the Gaussian blur. A value of 0.0 auto-calculates the sigma based on the radius.",
     )
 
     override_group = parser.add_argument_group(
@@ -157,6 +193,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Frames per second for the output video.",
     )
 
+    parser.set_defaults(**config_defaults)
+
     return parser.parse_args(args)
 
 
@@ -171,6 +209,8 @@ def main(
     to_video: bool = False,
     duration: float = 30.0,
     fps: int = 60,
+    blur_radius: int = 0,
+    blur_sigma: float = 0.0,
 ):
 
     target_factory = ALGORITHM_REGISTRY[algo_key].factory
@@ -203,6 +243,18 @@ def main(
     if locked_params:
         configs = [replace(config, **locked_params) for config in configs]
 
+    engine_config: dict[str, Any] = {
+        "algorithm": algo_key,
+        "master_seed": master_seed,
+        "batch_size": batch_size,
+        "background_image": background_image,
+        "to_video": to_video,
+        "duration": duration,
+        "fps": fps,
+        "blur_radius": blur_radius,
+        "blur_sigma": blur_sigma,
+    }
+
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = executor.map(
             target_runner,
@@ -213,6 +265,9 @@ def main(
             repeat(fps),
             repeat(batch_directory),
             repeat(background_image),
+            repeat(blur_radius),
+            repeat(blur_sigma),
+            repeat(engine_config),
         )
         list(results)
 
@@ -232,16 +287,19 @@ def extract_locks(parsed_args: argparse.Namespace, algo_key: str) -> dict[str, A
         elif f.type is str:
             locks[f.name] = str(raw_value)
         elif f.type is bool:
-            val_lower = raw_value.lower()
-            if val_lower == "true":
-                locks[f.name] = True
-            elif val_lower == "false":
-                locks[f.name] = False
+            if isinstance(raw_value, bool):
+                locks[f.name] = raw_value
             else:
-                raise ValueError(
-                    f"Invalid boolean value for --{f.name}: '{raw_value}'. "
-                    "Expected 'True' or 'False'."
-                )
+                val_lower = str(raw_value).lower()
+                if val_lower == "true":
+                    locks[f.name] = True
+                elif val_lower == "false":
+                    locks[f.name] = False
+                else:
+                    raise ValueError(
+                        f"Invalid boolean value for --{f.name}: '{raw_value}'. "
+                        "Expected 'True' or 'False'."
+                    )
         else:
             raise NotImplementedError(
                 f"CLI parsing for field '{f.name}' of type {f.type} is not yet implemented."
@@ -252,21 +310,24 @@ def extract_locks(parsed_args: argparse.Namespace, algo_key: str) -> dict[str, A
 
 def load_image_config(filepath: str, algo_key: str) -> Any:
     target_config = ALGORITHM_REGISTRY[algo_key].config
-    meta_key = ALGORITHM_REGISTRY[algo_key].meta_key
+    meta_key = "MimikryConfig"
 
     with Image.open(filepath) as img:
         metadata = img.info
 
-    if meta_key not in metadata:
-        raise ValueError(f"Missing '{meta_key}' chunk in PNG metadata for {filepath}")
+    full_config = json.loads(metadata[meta_key])
 
-    config_dict = json.loads(metadata[meta_key])
-    return target_config(**config_dict)
+    algo_config = full_config["algorithm"]
+    return target_config(**algo_config)
 
 
-def show_metadata(filepath: str, algo_key: str) -> None:
-    config = load_image_config(filepath, algo_key)
-    print(json.dumps(asdict(config), indent=4))
+def show_metadata(filepath: str) -> None:
+    meta_key = "MimikryConfig"
+
+    with Image.open(filepath) as img:
+        metadata = img.info
+
+    print(json.dumps(json.loads(metadata[meta_key]), indent=4))
 
 
 def validate_execution(
@@ -283,7 +344,7 @@ if __name__ == "__main__":
     algo_key = parsed_args.algorithm
 
     if parsed_args.show_metadata and parsed_args.image:
-        show_metadata(parsed_args.image, algo_key)
+        show_metadata(parsed_args.image)
         exit(0)
 
     locked_parameters = extract_locks(parsed_args, algo_key)
@@ -298,4 +359,6 @@ if __name__ == "__main__":
         to_video=parsed_args.to_video,
         duration=parsed_args.duration,
         fps=parsed_args.fps,
+        blur_radius=parsed_args.blur_radius,
+        blur_sigma=parsed_args.blur_sigma,
     )

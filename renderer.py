@@ -81,39 +81,64 @@ def apply_shader(
                     out[y, x, c] = background_color[c]
 
 
+from numba import njit  # type: ignore
+import numpy as np
+from numpy.typing import NDArray
+
+
 @njit(fastmath=True, cache=True)  # type: ignore
-def apply_box_blur(img: NDArray[np.uint8], radius: int) -> NDArray[np.uint8]:
+def apply_gaussian_blur(
+    img: NDArray[np.uint8], radius: int, sigma: float = 0.0
+) -> NDArray[np.uint8]:
     h, w, c = img.shape
     out = np.zeros_like(img)
 
     if radius <= 0:
         return img.copy()
 
+    if sigma <= 0.0:
+        sigma = max(radius / 2.0, 1.0)
+
+    k_size = 2 * radius + 1
+    kernel = np.zeros((k_size, k_size), dtype=np.float32)
+    k_sum = 0.0
+
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            val = np.exp(-(dx**2 + dy**2) / (2.0 * sigma**2))
+            kernel[dy + radius, dx + radius] = val
+            k_sum += val
+
     for y in range(h):
         for x in range(w):
             for ch in range(c):
-                val = 0
-                count = 0
+                val = 0.0
                 for dy in range(-radius, radius + 1):
                     ny = y + dy
-                    if ny < 0 or ny >= h:
-                        continue
+                    if ny < 0:
+                        ny = 0
+                    elif ny >= h:
+                        ny = h - 1
+
                     for dx in range(-radius, radius + 1):
                         nx = x + dx
-                        if nx < 0 or nx >= w:
-                            continue
+                        if nx < 0:
+                            nx = 0
+                        elif nx >= w:
+                            nx = w - 1
 
-                        val += img[ny, nx, ch]
-                        count += 1
+                        k_val = kernel[dy + radius, dx + radius] / k_sum
+                        val += img[ny, nx, ch] * k_val
 
-                out[y, x, ch] = val // count
+                out[y, x, ch] = np.uint8(val)
+
     return out
 
 
 @njit(fastmath=True, cache=True)  # type: ignore
 def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uint8]:
     h, w, c = fg.shape
-    out = np.empty_like(fg)
+    out = np.zeros_like(fg)
 
     for y in range(h):
         for x in range(w):
@@ -125,9 +150,11 @@ def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uin
     return out
 
 
-def save_static_image(filepath: str, color_buffer: NDArray[np.uint8], config_json: str):
+def save_static_image(
+    filepath: str, color_buffer: NDArray[np.uint8], unified_json: str
+):
     meta_data = PngInfo()
-    meta_data.add_text("EdenConfig", config_json)
+    meta_data.add_text("MimikryConfig", unified_json)
     Image.fromarray(color_buffer, mode="RGBA").save(filepath, pnginfo=meta_data)
 
 

@@ -131,6 +131,9 @@ def run_eden(
     fps: int,
     batch_directory: str,
     background_image: str | None,
+    blur_radius: int,
+    blur_sigma: float,
+    engine_config: dict[str, Any],
 ):
     task_rng = np.random.default_rng(config.simulation_seed)
     canvas = np.zeros((config.height, config.width), dtype=np.uint32)
@@ -182,7 +185,9 @@ def run_eden(
                 config.sig_midpoint,
             )
             renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
-            blurred_buffer = renderer.apply_box_blur(color_buffer, radius=0)
+            blurred_buffer = renderer.apply_gaussian_blur(
+                color_buffer, blur_radius, blur_sigma
+            )
             out_buffer = (
                 renderer.layer_images(blurred_buffer, background_array)
                 if background_array is not None
@@ -203,14 +208,20 @@ def run_eden(
         )
 
         renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
-        blurred_buffer = renderer.apply_box_blur(color_buffer, radius=0)
+        blurred_buffer = renderer.apply_gaussian_blur(
+            color_buffer, blur_radius, blur_sigma
+        )
         out_buffer = (
             renderer.layer_images(blurred_buffer, background_array)
             if background_array is not None
             else blurred_buffer
         )
+
+        unified_config = {"engine": engine_config, "algorithm": asdict(config)}
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
-        renderer.save_static_image(output_filepath, out_buffer, config.to_json())
+        renderer.save_static_image(
+            output_filepath, out_buffer, json.dumps(unified_config)
+        )
 
 
 @njit(cache=True)  # type: ignore
