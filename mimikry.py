@@ -12,7 +12,8 @@ from datetime import datetime
 import algorithms.eden as eden
 
 """ ToDo's
-    - Remove black formatter character limit per line
+    - Max_neighborhood weirdness causes tournament to spawn seed at 0,0
+    - Iterations must be compatible with fps and duration? Animation cutoff...
     - Add game of life algorithm
     - Add non-linear video time
     - Add video start, where prompt is typed
@@ -64,7 +65,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
             if "algorithm" in raw_config:
                 config_defaults.update(raw_config["algorithm"])
 
-    algo_key = known_args.algorithm
+    algo_key = str(known_args.algorithm or config_defaults.get("algorithm"))
+
     target_config = ALGORITHM_REGISTRY[algo_key].config
 
     parser = argparse.ArgumentParser(description="Mimikry Generative Art Engine")
@@ -73,6 +75,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "algorithm",
         type=str,
         choices=list(ALGORITHM_REGISTRY.keys()),
+        nargs="?",
         help="The specific generative algorithm to run.",
     )
 
@@ -145,9 +148,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Sigma for the Gaussian blur. A value of 0.0 auto-calculates the sigma based on the radius.",
     )
 
-    override_group = parser.add_argument_group(
-        f"{algo_key.capitalize()} Parameter Overrides (Locks)"
-    )
+    override_group = parser.add_argument_group(f"{algo_key.capitalize()} Parameter Overrides (Locks)")
 
     for f in fields(target_config):
         if hasattr(target_config, "BG_COLORS") and f.name == "background_color":
@@ -229,16 +230,11 @@ def main(
     if image_filepath:
         base_config = load_image_config(image_filepath, algo_key)
         if unlocked_parameters:
-            configs = [
-                target_factory.unlock(base_config, master_rng, unlocked_parameters)
-                for _ in range(batch_size)
-            ]
+            configs = [target_factory.unlock(base_config, master_rng, unlocked_parameters) for _ in range(batch_size)]
         else:
             configs = [base_config for _ in range(batch_size)]
     else:
-        configs = [
-            target_factory.generate_random(master_rng) for _ in range(batch_size)
-        ]
+        configs = [target_factory.generate_random(master_rng) for _ in range(batch_size)]
 
     if locked_params:
         configs = [replace(config, **locked_params) for config in configs]
@@ -296,14 +292,9 @@ def extract_locks(parsed_args: argparse.Namespace, algo_key: str) -> dict[str, A
                 elif val_lower == "false":
                     locks[f.name] = False
                 else:
-                    raise ValueError(
-                        f"Invalid boolean value for --{f.name}: '{raw_value}'. "
-                        "Expected 'True' or 'False'."
-                    )
+                    raise ValueError(f"Invalid boolean value for --{f.name}: '{raw_value}'. " "Expected 'True' or 'False'.")
         else:
-            raise NotImplementedError(
-                f"CLI parsing for field '{f.name}' of type {f.type} is not yet implemented."
-            )
+            raise NotImplementedError(f"CLI parsing for field '{f.name}' of type {f.type} is not yet implemented.")
 
     return locks
 
@@ -330,13 +321,9 @@ def show_metadata(filepath: str) -> None:
     print(json.dumps(json.loads(metadata[meta_key]), indent=4))
 
 
-def validate_execution(
-    image_filepath: str | None, unlocked_parameters: list[str] | None, batch_size: int
-) -> None:
+def validate_execution(image_filepath: str | None, unlocked_parameters: list[str] | None, batch_size: int) -> None:
     if image_filepath and not unlocked_parameters and batch_size > 1:
-        raise ValueError(
-            "Cannot generate a batch > 1 from a parent image without unlocking parameters to prevent redundant processing."
-        )
+        raise ValueError("Cannot generate a batch > 1 from a parent image without unlocking parameters to prevent redundant processing.")
 
 
 if __name__ == "__main__":

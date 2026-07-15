@@ -2,16 +2,13 @@ import numpy as np
 from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from numpy.random import Generator
-from dataclasses import dataclass, asdict, replace
-import json
-from typing import Callable, Any, ClassVar
-from PIL import Image
-import os
-import renderer
+from dataclasses import dataclass
+from typing import Any
+from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
 @dataclass
-class EdenConfig:
+class EdenConfig(AlgorithmBaseConfig):
     height: int
     width: int
     iterations: int
@@ -29,62 +26,20 @@ class EdenConfig:
     norm_power: float
     sig_steepness: float
     sig_midpoint: float
-    color_palette: str
-    background_color: str
-
-    COLOR_PALETTES: ClassVar[dict[str, list[list[int]]]] = {
-        "grayscale": [[0, 0, 0, 255], [255, 255, 255, 255]],
-        "fire": [[0, 0, 0, 255], [255, 0, 0, 255], [255, 255, 0, 255]],
-        "ocean": [[0, 0, 50, 255], [0, 150, 255, 255], [200, 255, 255, 255]],
-        "neon": [[20, 0, 40, 255], [255, 0, 255, 255], [0, 255, 255, 255]],
-        "circuit": [[10, 30, 15, 255], [0, 160, 70, 255], [215, 175, 55, 255]],
-        "tree": [[92, 64, 51, 255], [52, 199, 89, 255]],
-    }
-
-    BG_COLORS: ClassVar[dict[str, list[int]]] = {
-        "transparent_black": [0, 0, 0, 0],
-        "black": [0, 0, 0, 255],
-        "white": [255, 255, 255, 255],
-        "transparent_white": [255, 255, 255, 0],
-    }
 
     def __post_init__(self):
+        super().__post_init__()
         if self.minkowski_radius <= 0:
-            raise ValueError(
-                f"Fatal: minkowski_radius must be > 0. Received {self.minkowski_radius}"
-            )
+            raise ValueError(f"Fatal: minkowski_radius must be > 0. Received {self.minkowski_radius}")
         if self.iterations <= 0:
-            raise ValueError(
-                f"Fatal: iterations must be > 0. Received {self.iterations}"
-            )
+            raise ValueError(f"Fatal: iterations must be > 0. Received {self.iterations}")
         if self.tournament_size < 1:
-            raise ValueError(
-                f"Tournament size must be > 0. Received {self.tournament_size}"
-            )
-        if self.color_palette not in self.COLOR_PALETTES:
-            valid_keys = list(self.COLOR_PALETTES.keys())
-            raise ValueError(
-                f"Fatal: Invalid palette '{self.color_palette}'. Valid options: {valid_keys}"
-            )
-        if self.background_color not in self.BG_COLORS:
-            valid_keys = list(self.BG_COLORS.keys())
-            raise ValueError(
-                f"Fatal: Invalid background '{self.background_color}'. Valid options: {valid_keys}"
-            )
-
-    def get_palette_array(self) -> np.ndarray:
-        """Returns the Numba-ready NumPy array for this configuration's palette."""
-        return np.array(self.COLOR_PALETTES[self.color_palette], dtype=np.uint8)
-
-    def get_background_array(self) -> np.ndarray:
-        return np.array(self.BG_COLORS[self.background_color], dtype=np.uint8)
-
-    def to_json(self) -> str:
-        return json.dumps(asdict(self))
+            raise ValueError(f"Tournament size must be > 0. Received {self.tournament_size}")
 
 
-class EdenFactory:
-    _RULES: ClassVar[dict[str, Callable[[Generator], Any]]] = {
+class EdenFactory(AlgorithmBaseFactory):
+    _CONFIG_CLASS = EdenConfig
+    _RULES = {
         "height": lambda rng: int(rng.integers(250, 1001)) * 2,
         "width": lambda rng: int(rng.integers(250, 1001)) * 2,
         "iterations": lambda rng: int(rng.integers(1000000, 2000000)),
@@ -102,30 +57,14 @@ class EdenFactory:
         "norm_power": lambda rng: float(rng.uniform(0.5, 2.5)),
         "sig_steepness": lambda rng: float(rng.uniform(1.0, 10.0)),
         "sig_midpoint": lambda rng: float(rng.uniform(0.1, 0.9)),
-        "color_palette": lambda rng: str(
-            rng.choice(list(EdenConfig.COLOR_PALETTES.keys()))
-        ),
-        "background_color": lambda rng: str(
-            rng.choice(list(EdenConfig.BG_COLORS.keys()))
-        ),
+        "color_palette": lambda rng: str(rng.choice(list(EdenConfig.COLOR_PALETTES.keys()))),
+        "background_color": lambda rng: str(rng.choice(list(EdenConfig.BG_COLORS.keys()))),
     }
-
-    @classmethod
-    def generate_random(cls, rng: Generator) -> EdenConfig:
-        new_values = {key: rule(rng) for key, rule in cls._RULES.items()}
-        return EdenConfig(**new_values)
-
-    @classmethod
-    def unlock(
-        cls, base_config: EdenConfig, rng: Generator, unlocked_keys: list[str]
-    ) -> EdenConfig:
-        new_values = {key: cls._RULES[key](rng) for key in unlocked_keys}
-        return replace(base_config, **new_values)
 
 
 def run_eden(
     i: int,
-    config: EdenConfig,
+    config: EdenConfig,  # Ensure EdenConfig is imported in the actual file
     to_video: bool,
     duration: float,
     fps: int,
@@ -135,93 +74,24 @@ def run_eden(
     blur_sigma: float,
     engine_config: dict[str, Any],
 ):
-    task_rng = np.random.default_rng(config.simulation_seed)
-    canvas = np.zeros((config.height, config.width), dtype=np.uint32)
-    color_palette = config.get_palette_array()
-    background_color = config.get_background_array()
-    color_buffer = np.zeros(
-        (config.height, config.width, color_palette.shape[1]), dtype=np.uint8
-    )
-
-    background_array = None
-    if background_image:
-        with Image.open(background_image) as img:
-            background_array = np.array(img.convert("RGBA"), dtype=np.uint8)
-
-    capture_interval = 0
-    process = None
-
-    if to_video:
-        total_frames = int(duration * fps)
-        capture_interval = max(1, config.iterations // total_frames)
-        output_filepath = os.path.join(batch_directory, f"{i:04d}.mp4")
-        process = renderer.initialize_video_stream(
-            config.width, config.height, fps, output_filepath
-        )
-
-    eden_generator = eden(
-        task_rng,
-        canvas,
-        config.iterations,
-        config.seed_amount,
-        config.perimeter_size,
-        config.perimeter_filled,
-        config.bias,
-        config.bias_power,
-        config.max_neighbor_weirdness,
-        config.minkowski_radius,
-        config.minkowski_power,
-        config.tournament_size,
-        capture_interval,
-    )
-
-    for status in eden_generator:
-        if to_video and status in (0, 1) and process:
-            norm_c = renderer.normalize(
-                canvas,
-                config.norm_method,
-                config.norm_power,
-                config.sig_steepness,
-                config.sig_midpoint,
-            )
-            renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
-            blurred_buffer = renderer.apply_gaussian_blur(
-                color_buffer, blur_radius, blur_sigma
-            )
-            out_buffer = (
-                renderer.layer_images(blurred_buffer, background_array)
-                if background_array is not None
-                else blurred_buffer
-            )
-            process.stdin.write(color_buffer.tobytes())  # type: ignore
-
-    if to_video and process:
-        process.stdin.close()  # type: ignore
-        process.wait()
-    else:
-        norm_c = renderer.normalize(
+    def factory(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
+        return eden(
+            task_rng,
             canvas,
-            config.norm_method,
-            config.norm_power,
-            config.sig_steepness,
-            config.sig_midpoint,
+            config.iterations,
+            config.seed_amount,
+            config.perimeter_size,
+            config.perimeter_filled,
+            config.bias,
+            config.bias_power,
+            config.max_neighbor_weirdness,
+            config.minkowski_radius,
+            config.minkowski_power,
+            config.tournament_size,
+            capture_interval,
         )
 
-        renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
-        blurred_buffer = renderer.apply_gaussian_blur(
-            color_buffer, blur_radius, blur_sigma
-        )
-        out_buffer = (
-            renderer.layer_images(blurred_buffer, background_array)
-            if background_array is not None
-            else blurred_buffer
-        )
-
-        unified_config = {"engine": engine_config, "algorithm": asdict(config)}
-        output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
-        renderer.save_static_image(
-            output_filepath, out_buffer, json.dumps(unified_config)
-        )
+    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, factory)
 
 
 @njit(cache=True)  # type: ignore
@@ -306,9 +176,7 @@ def eden(
         else:
             best_idx = -1
             best_fitness = -1.0
-            tournament = build_tournament(
-                rng, num_candidates, min(tournament_size, num_candidates)
-            )
+            tournament = build_tournament(rng, num_candidates, min(tournament_size, num_candidates))
             for idx in tournament:
                 cy = candidates[idx, 0]
                 cx = candidates[idx, 1]
@@ -341,9 +209,7 @@ def eden(
             cx = nx + perimeter[p, 0]
             if 0 <= cy < height and 0 <= cx < width:
                 if canvas[cy, cx] == 0:
-                    num_candidates = push_candidate(
-                        cy, cx, num_candidates, candidates, canvas
-                    )
+                    num_candidates = push_candidate(cy, cx, num_candidates, candidates, canvas)
 
         if capture_interval > 0 and i % capture_interval == 0:
             yield 0
@@ -469,21 +335,15 @@ def precompute_static_fitness(
             elif bias == 4:
                 total_dist_sq = 0.0
                 for s in range(seed_amount):
-                    dist_sq = float(
-                        (y - initial_seeds[s, 0]) ** 2 + (x - initial_seeds[s, 1]) ** 2
-                    )
+                    dist_sq = float((y - initial_seeds[s, 0]) ** 2 + (x - initial_seeds[s, 1]) ** 2)
                     total_dist_sq += dist_sq
-                fitness_map[y, x] = (
-                    total_dist_sq / (seed_amount * canvas_max_dist_sq)
-                ) ** bias_power
+                fitness_map[y, x] = (total_dist_sq / (seed_amount * canvas_max_dist_sq)) ** bias_power
 
     return fitness_map
 
 
 @njit(cache=True)  # type: ignore
-def build_tournament(
-    rng: Generator, pool_size: int, tournament_size: int
-) -> NDArray[np.int32]:
+def build_tournament(rng: Generator, pool_size: int, tournament_size: int) -> NDArray[np.int32]:
     tournament = np.empty(tournament_size, dtype=np.int32)
 
     for i in range(tournament_size):

@@ -86,6 +86,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+from numba import njit  # type: ignore
+import numpy as np
+from numpy.typing import NDArray
+
+
 @njit(fastmath=True, cache=True)  # type: ignore
 def apply_gaussian_blur(
     img: NDArray[np.uint8], radius: int, sigma: float = 0.0
@@ -100,14 +105,32 @@ def apply_gaussian_blur(
         sigma = max(radius / 2.0, 1.0)
 
     k_size = 2 * radius + 1
-    kernel = np.zeros((k_size, k_size), dtype=np.float32)
+    kernel = np.zeros(k_size, dtype=np.float32)
     k_sum = 0.0
 
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            val = np.exp(-(dx**2 + dy**2) / (2.0 * sigma**2))
-            kernel[dy + radius, dx + radius] = val
-            k_sum += val
+    for i in range(-radius, radius + 1):
+        val = np.exp(-(i**2) / (2.0 * sigma**2))
+        kernel[i + radius] = val
+        k_sum += val
+
+    for i in range(k_size):
+        kernel[i] /= k_sum
+
+    temp = np.zeros((h, w, c), dtype=np.float32)
+
+    for y in range(h):
+        for x in range(w):
+            for ch in range(c):
+                val = 0.0
+                for dx in range(-radius, radius + 1):
+                    nx = x + dx
+                    if nx < 0:
+                        nx = 0
+                    elif nx >= w:
+                        nx = w - 1
+
+                    val += img[y, nx, ch] * kernel[dx + radius]
+                temp[y, x, ch] = val
 
     for y in range(h):
         for x in range(w):
@@ -120,16 +143,7 @@ def apply_gaussian_blur(
                     elif ny >= h:
                         ny = h - 1
 
-                    for dx in range(-radius, radius + 1):
-                        nx = x + dx
-                        if nx < 0:
-                            nx = 0
-                        elif nx >= w:
-                            nx = w - 1
-
-                        k_val = kernel[dy + radius, dx + radius] / k_sum
-                        val += img[ny, nx, ch] * k_val
-
+                    val += temp[ny, x, ch] * kernel[dy + radius]
                 out[y, x, ch] = np.uint8(val)
 
     return out
