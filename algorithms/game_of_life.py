@@ -25,7 +25,7 @@ class GameOfLifeFactory(AlgorithmBaseFactory):
     _RULES = {
         "height": lambda rng: int(rng.integers(250, 1001)) * 2,
         "width": lambda rng: int(rng.integers(250, 1001)) * 2,
-        "iterations": lambda rng: int(rng.integers(1000000, 2000000)),
+        "iterations": lambda rng: int(rng.integers(100, 1000)),
         "simulation_seed": lambda rng: int(rng.integers(0, 4294967296)),
         "seed_amount": lambda rng: int(rng.integers(1, 11)),
         "norm_method": lambda rng: int(rng.integers(0, 4)),

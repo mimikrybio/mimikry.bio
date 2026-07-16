@@ -96,7 +96,7 @@ def run_algorithm(
         total_frames = int(duration * fps)
         capture_interval = max(1, config.iterations // total_frames)
         output_filepath = os.path.join(batch_directory, f"{i:04d}.mp4")
-        process = renderer.initialize_video_stream(config.width, config.height, fps, output_filepath)
+        process = renderer.initialize_video_stream(config.width * 24, config.height * 24, fps, output_filepath)
 
     algorithm_generator = generator_factory(task_rng, canvas, capture_interval)
 
@@ -111,7 +111,8 @@ def run_algorithm(
             )
             renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
             blurred_buffer = renderer.apply_gaussian_blur(color_buffer, blur_radius, blur_sigma)
-            out_buffer = renderer.layer_images(blurred_buffer, background_array) if background_array is not None else blurred_buffer
+            scaled_buffer = renderer.apply_scaling(blurred_buffer, 24)
+            out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
             process.stdin.write(out_buffer.tobytes())  # type: ignore
 
     if to_video and process:
@@ -128,7 +129,8 @@ def run_algorithm(
 
         renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
         blurred_buffer = renderer.apply_gaussian_blur(color_buffer, blur_radius, blur_sigma)
-        out_buffer = renderer.layer_images(blurred_buffer, background_array) if background_array is not None else blurred_buffer
+        scaled_buffer = renderer.apply_scaling(blurred_buffer, 24)
+        out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
 
         unified_config = {"engine": engine_config, "algorithm": asdict(config)}
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")

@@ -73,9 +73,7 @@ def apply_shader(
                 frac = scaled - idx
 
                 for c in range(chans):
-                    out[y, x, c] = int(
-                        pal[idx, c] + (pal[idx + 1, c] - pal[idx, c]) * frac
-                    )
+                    out[y, x, c] = int(pal[idx, c] + (pal[idx + 1, c] - pal[idx, c]) * frac)
             else:
                 for c in range(chans):
                     out[y, x, c] = background_color[c]
@@ -92,9 +90,7 @@ from numpy.typing import NDArray
 
 
 @njit(fastmath=True, cache=True)  # type: ignore
-def apply_gaussian_blur(
-    img: NDArray[np.uint8], radius: int, sigma: float = 0.0
-) -> NDArray[np.uint8]:
+def apply_gaussian_blur(img: NDArray[np.uint8], radius: int, sigma: float = 0.0) -> NDArray[np.uint8]:
     h, w, c = img.shape
     out = np.zeros_like(img)
 
@@ -150,6 +146,30 @@ def apply_gaussian_blur(
 
 
 @njit(fastmath=True, cache=True)  # type: ignore
+def apply_scaling(img: NDArray[np.uint8], scaling_factor: float) -> NDArray[np.uint8]:
+    h, w, c = img.shape
+    new_h = int(h * scaling_factor)
+    new_w = int(w * scaling_factor)
+
+    out = np.zeros((new_h, new_w, c), dtype=np.uint8)
+
+    for y in range(new_h):
+        src_y = int(y / scaling_factor)
+        if src_y >= h:
+            src_y = h - 1
+
+        for x in range(new_w):
+            src_x = int(x / scaling_factor)
+            if src_x >= w:
+                src_x = w - 1
+
+            for ch in range(c):
+                out[y, x, ch] = img[src_y, src_x, ch]
+
+    return out
+
+
+@njit(fastmath=True, cache=True)  # type: ignore
 def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uint8]:
     h, w, c = fg.shape
     out = np.zeros_like(fg)
@@ -164,17 +184,13 @@ def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uin
     return out
 
 
-def save_static_image(
-    filepath: str, color_buffer: NDArray[np.uint8], unified_json: str
-):
+def save_static_image(filepath: str, color_buffer: NDArray[np.uint8], unified_json: str):
     meta_data = PngInfo()
     meta_data.add_text("MimikryConfig", unified_json)
     Image.fromarray(color_buffer, mode="RGBA").save(filepath, pnginfo=meta_data)
 
 
-def initialize_video_stream(
-    width: int, height: int, fps: int, output_filepath: str
-) -> subprocess.Popen[bytes]:
+def initialize_video_stream(width: int, height: int, fps: int, output_filepath: str) -> subprocess.Popen[bytes]:
     cmd = [
         "ffmpeg",
         "-y",

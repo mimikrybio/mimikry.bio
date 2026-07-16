@@ -13,6 +13,9 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - Turn scaling magic number into parameter
+    - Why is fps parameter not transfered from --image flag?
+    - How to handle different image dimension during layering?
     - Config arguments that are algorithm agnostic should be in "engine"
     - Max_neighborhood weirdness causes tournament to spawn seed at 0,0
     - Iterations must be compatible with fps and duration? Animation cutoff...
