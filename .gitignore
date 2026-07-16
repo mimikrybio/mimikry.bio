@@ -1,5 +1,6 @@
 __pycache__/
 .vscode/
+.DS_Store
 archive/
 batch_*/
 *_config.json
