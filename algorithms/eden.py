@@ -1,7 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
 from numba import njit  # type: ignore
-from numpy.random import Generator
 from dataclasses import dataclass
 from typing import Any
 from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
@@ -22,10 +21,6 @@ class EdenConfig(AlgorithmBaseConfig):
     minkowski_radius: int
     minkowski_power: float
     tournament_size: int
-    norm_method: int
-    norm_power: float
-    sig_steepness: float
-    sig_midpoint: float
 
     def __post_init__(self):
         super().__post_init__()
@@ -64,7 +59,7 @@ class EdenFactory(AlgorithmBaseFactory):
 
 def run_eden(
     i: int,
-    config: EdenConfig,  # Ensure EdenConfig is imported in the actual file
+    config: EdenConfig,
     to_video: bool,
     duration: float,
     fps: int,
@@ -74,7 +69,7 @@ def run_eden(
     blur_sigma: float,
     engine_config: dict[str, Any],
 ):
-    def factory(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
+    def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
         return eden(
             task_rng,
             canvas,
@@ -91,12 +86,12 @@ def run_eden(
             capture_interval,
         )
 
-    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, factory)
+    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, build_generator)
 
 
 @njit(cache=True)  # type: ignore
 def eden(
-    rng: Generator,
+    rng: np.random.Generator,
     canvas: NDArray[np.uint32],
     iterations: int,
     seed_amount: int,
@@ -343,7 +338,7 @@ def precompute_static_fitness(
 
 
 @njit(cache=True)  # type: ignore
-def build_tournament(rng: Generator, pool_size: int, tournament_size: int) -> NDArray[np.int32]:
+def build_tournament(rng: np.random.Generator, pool_size: int, tournament_size: int) -> NDArray[np.int32]:
     tournament = np.empty(tournament_size, dtype=np.int32)
 
     for i in range(tournament_size):

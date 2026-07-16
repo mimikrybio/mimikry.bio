@@ -9,6 +9,10 @@ import renderer
 
 @dataclass(kw_only=True)
 class AlgorithmBaseConfig:
+    norm_method: int
+    norm_power: float
+    sig_steepness: float
+    sig_midpoint: float
     color_palette: str
     background_color: str
 
@@ -97,7 +101,7 @@ def run_algorithm(
     algorithm_generator = generator_factory(task_rng, canvas, capture_interval)
 
     for status in algorithm_generator:
-        if to_video and status in (0, 1) and process:
+        if to_video and status == 0 and process:
             norm_c = renderer.normalize(
                 canvas,
                 config.norm_method,

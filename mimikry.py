@@ -10,8 +10,10 @@ import os
 from datetime import datetime
 
 import algorithms.eden as eden
+import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - Config arguments that are algorithm agnostic should be in "engine"
     - Max_neighborhood weirdness causes tournament to spawn seed at 0,0
     - Iterations must be compatible with fps and duration? Animation cutoff...
     - Add game of life algorithm
@@ -34,7 +36,12 @@ ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = {
         config=eden.EdenConfig,
         factory=eden.EdenFactory,
         runner=eden.run_eden,
-    )
+    ),
+    "game_of_life": AlgorithmEntry(
+        config=game_of_life.GameOfLifeConfig,
+        factory=game_of_life.GameOfLifeFactory,
+        runner=game_of_life.run_game_of_life,
+    ),
 }
 
 

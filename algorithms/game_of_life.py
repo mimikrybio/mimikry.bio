@@ -1,8 +1,9 @@
 import numpy as np
+from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
 from typing import Any
-from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory
+from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
 @dataclass
@@ -27,6 +28,12 @@ class GameOfLifeFactory(AlgorithmBaseFactory):
         "iterations": lambda rng: int(rng.integers(1000000, 2000000)),
         "simulation_seed": lambda rng: int(rng.integers(0, 4294967296)),
         "seed_amount": lambda rng: int(rng.integers(1, 11)),
+        "norm_method": lambda rng: int(rng.integers(0, 4)),
+        "norm_power": lambda rng: float(rng.uniform(0.5, 2.5)),
+        "sig_steepness": lambda rng: float(rng.uniform(1.0, 10.0)),
+        "sig_midpoint": lambda rng: float(rng.uniform(0.1, 0.9)),
+        "color_palette": lambda rng: str(rng.choice(list(GameOfLifeConfig.COLOR_PALETTES.keys()))),
+        "background_color": lambda rng: str(rng.choice(list(GameOfLifeConfig.BG_COLORS.keys()))),
     }
 
 
@@ -42,8 +49,72 @@ def run_game_of_life(
     blur_sigma: float,
     engine_config: dict[str, Any],
 ):
-    task_rng = np.random.default_rng(config.simulation_seed)
-    canvas = np.zeros((config.height, config.width), dtype=np.uint32)
-    color_palette = config.get_palette_array()
-    background_color = config.get_background_array()
-    color_buffer = np.zeros((config.height, config.width, color_palette.shape[1]), dtype=np.uint8)
+    def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
+        return game_of_life(
+            task_rng,
+            canvas,
+            config.iterations,
+            config.seed_amount,
+            capture_interval,
+        )
+
+    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, build_generator)
+
+
+@njit(cache=True)  # type: ignore
+def game_of_life(
+    rng: np.random.Generator,
+    canvas: NDArray[np.uint32],
+    iterations: int,
+    seed_amount: int,
+    capture_interval: int,
+):
+    height = canvas.shape[0]
+    width = canvas.shape[1]
+
+    for _ in range(seed_amount):
+        sy = rng.integers(0, height)  # type: ignore
+        sx = rng.integers(0, width)  # type: ignore
+        canvas[sy, sx] = 1
+
+    next_canvas = np.empty((height, width), dtype=np.uint32)
+
+    if capture_interval > 0:
+        yield 0
+
+    for i in range(1, iterations + 1):
+        for y in range(height):
+            for x in range(width):
+                alive_neighbors = 0
+
+                neighborhood_top_edge = max(0, y - 1)
+                neighborhood_bottom_edge = min(height, y + 2)
+                neighborhood_left_edge = max(0, x - 1)
+                neighborhood_right_edge = min(width, x + 2)
+
+                for ny in range(neighborhood_top_edge, neighborhood_bottom_edge):
+                    for nx in range(neighborhood_left_edge, neighborhood_right_edge):
+                        if ny == y and nx == x:
+                            continue
+                        if canvas[ny, nx] > 0:
+                            alive_neighbors += 1
+
+                if canvas[y, x] > 0:
+                    if alive_neighbors == 2 or alive_neighbors == 3:
+                        next_canvas[y, x] = 1
+                    else:
+                        next_canvas[y, x] = 0
+                else:
+                    if alive_neighbors == 3:
+                        next_canvas[y, x] = 1
+                    else:
+                        next_canvas[y, x] = 0
+
+        for y in range(height):
+            for x in range(width):
+                canvas[y, x] = next_canvas[y, x]
+
+        if capture_interval > 0 and i % capture_interval == 0:
+            yield 0
+
+    yield 1
