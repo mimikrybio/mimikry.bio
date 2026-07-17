@@ -3,6 +3,7 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
 from typing import Callable, Any, ClassVar
+from renderer import RendererConfig
 from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
@@ -51,34 +52,29 @@ class EdenFactory(AlgorithmBaseFactory):
 
 def run_eden(
     i: int,
-    config: EdenConfig,
-    to_video: bool,
-    duration: float,
-    fps: int,
+    algorithm_config: EdenConfig,
+    renderer_config: RendererConfig,
     batch_directory: str,
-    background_image: str | None,
-    blur_radius: int,
-    blur_sigma: float,
     engine_config: dict[str, Any],
 ):
     def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
         return eden(
             task_rng,
             canvas,
-            config.iterations,
-            config.seed_amount,
-            config.perimeter_size,
-            config.perimeter_filled,
-            config.bias,
-            config.bias_power,
-            config.max_neighbor_weirdness,
-            config.minkowski_radius,
-            config.minkowski_power,
-            config.tournament_size,
+            algorithm_config.iterations,
+            algorithm_config.seed_amount,
+            algorithm_config.perimeter_size,
+            algorithm_config.perimeter_filled,
+            algorithm_config.bias,
+            algorithm_config.bias_power,
+            algorithm_config.max_neighbor_weirdness,
+            algorithm_config.minkowski_radius,
+            algorithm_config.minkowski_power,
+            algorithm_config.tournament_size,
             capture_interval,
         )
 
-    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, build_generator)
+    run_algorithm(i, algorithm_config, renderer_config, batch_directory, engine_config, build_generator)
 
 
 @njit(cache=True)  # type: ignore

@@ -1,6 +1,6 @@
 import numpy as np
 import concurrent.futures
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields, replace, asdict
 import json
 from typing import Any, Callable
 import argparse
@@ -8,12 +8,19 @@ from PIL import Image
 from itertools import repeat
 import os
 from datetime import datetime
+import sys
 
+from renderer import RendererConfig
 import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
-    - seed_amount as fraction of total pixels, not absolute value
+    - Improve how RendererConfig is constructed in __name__ block
+    - Implement reduced argparser from Gemini?"
+    - Should RendererConfig really be repeated? Or randomize and 1 per AlgorithmConfig?
+    - Bring metadata structure in line with configs used
+    - Engine config for top-level arguments?
+    - remove initial parser and make algorithm just another argument?
     - Independent scaling for height and width
     - Why is fps parameter not transfered from --image flag?
     - How to handle different image dimension during layering?
@@ -48,169 +55,29 @@ ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = {
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
-    initial_parser = argparse.ArgumentParser(add_help=False)
-    initial_parser.add_argument(
-        "algorithm",
-        type=str,
-        choices=list(ALGORITHM_REGISTRY.keys()),
-        nargs="?",
-        default=None,
-    )
-    initial_parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default=None,
-        help="Path to a JSON configuration file.",
-    )
-    known_args, _ = initial_parser.parse_known_args(args)
-
-    config_defaults: dict[str, Any] = {}
-    if known_args.config:
-        with open(known_args.config, "r") as f:
-            raw_config = json.load(f)
-            if "engine" in raw_config:
-                config_defaults.update(raw_config["engine"])
-            if "algorithm" in raw_config:
-                config_defaults.update(raw_config["algorithm"])
-
-    algo_key = str(known_args.algorithm or config_defaults.get("algorithm"))
-
-    target_config = ALGORITHM_REGISTRY[algo_key].config
+    target_args = args if args is not None else sys.argv[1:]
+    algo_key = next((arg for arg in target_args if arg in ALGORITHM_REGISTRY), None)
 
     parser = argparse.ArgumentParser(description="Mimikry Generative Art Engine")
+    parser.add_argument("algorithm", type=str, choices=list(ALGORITHM_REGISTRY.keys()), nargs="?")
+    parser.add_argument("-c", "--config", type=str, default=None, help="Path to a JSON configuration file.")
+    parser.add_argument("-b", "--batch_size", type=int, default=1, help="Number of images to generate per execution.")
+    parser.add_argument("-m", "--master_seed", type=int, default=None, help="Master seed for batch determinism.")
+    parser.add_argument("-i", "--image", type=str, default=None, help="Path to a PNG file to load the base configuration from.")
+    parser.add_argument("--show_metadata", action="store_true", help="Print the configuration metadata of the provided --image and exit.")
+    parser.add_argument("-u", "--unlock", nargs="+", type=str, default=None, help="Parameters to unlock for mutation (e.g., -u bias).")
 
-    parser.add_argument(
-        "algorithm",
-        type=str,
-        choices=list(ALGORITHM_REGISTRY.keys()),
-        nargs="?",
-        help="The specific generative algorithm to run.",
-    )
+    def add_dataclass_args(dataclass_type: Any):
+        for f in fields(dataclass_type):
+            if f.type is bool:
+                parser.add_argument(f"--{f.name}", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
+            else:
+                parser.add_argument(f"--{f.name}", type=f.type if f.type in [int, float, str] else str, default=argparse.SUPPRESS)
 
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default=None,
-        help="Path to a JSON configuration file.",
-    )
+    add_dataclass_args(RendererConfig)
 
-    parser.add_argument(
-        "-b",
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Number of images to generate per execution.",
-    )
-
-    parser.add_argument(
-        "-m",
-        "--master_seed",
-        type=int,
-        default=None,
-        help="Master seed for batch determinism. If omitted, pulls from OS entropy.",
-    )
-
-    parser.add_argument(
-        "-i",
-        "--image",
-        type=str,
-        default=None,
-        help="Path to a PNG file to load the base configuration from.",
-    )
-
-    parser.add_argument(
-        "--show_metadata",
-        action="store_true",
-        help="Print the configuration metadata of the provided --image and exit.",
-    )
-
-    parser.add_argument(
-        "-u",
-        "--unlock",
-        nargs="+",
-        type=str,
-        default=None,
-        help="Parameters to unlock for mutation (e.g., -u bias).",
-    )
-
-    parser.add_argument(
-        "-bg",
-        "--background_image",
-        type=str,
-        default=None,
-        help="Path to a PNG file to use as the background layer.",
-    )
-
-    render_group = parser.add_argument_group("Rendering Options")
-    render_group.add_argument(
-        "--blur_radius",
-        type=int,
-        default=0,
-        help="Radius for the Gaussian blur. A value of 0 disables the blur.",
-    )
-    render_group.add_argument(
-        "--blur_sigma",
-        type=float,
-        default=0.0,
-        help="Sigma for the Gaussian blur. A value of 0.0 auto-calculates the sigma based on the radius.",
-    )
-
-    render_group.add_argument(
-        "--scaling_factor",
-        type=int,
-        default=1,
-        help="Target scaling factor.",
-    )
-
-    override_group = parser.add_argument_group(f"{algo_key.capitalize()} Parameter Overrides (Locks)")
-
-    for f in fields(target_config):
-        if hasattr(target_config, "BG_COLORS") and f.name == "background_color":
-            override_group.add_argument(
-                f"--{f.name}",
-                type=str,
-                choices=list(target_config.BG_COLORS.keys()),
-                default=None,
-                help=f"Lock the {f.name} parameter.",
-            )
-        elif hasattr(target_config, "COLOR_PALETTES") and f.name == "color_palette":
-            override_group.add_argument(
-                f"--{f.name}",
-                type=str,
-                choices=list(target_config.COLOR_PALETTES.keys()),
-                default=None,
-                help=f"Lock the {f.name} parameter.",
-            )
-        else:
-            override_group.add_argument(
-                f"--{f.name}",
-                type=str,
-                default=None,
-                help=f"Lock the {f.name} parameter.",
-            )
-
-    video_group = parser.add_argument_group("Video Rendering Options")
-    video_group.add_argument(
-        "--to_video",
-        action="store_true",
-        help="Trigger video generation instead of static image output.",
-    )
-    video_group.add_argument(
-        "--duration",
-        type=float,
-        default=30.0,
-        help="Target video duration in seconds.",
-    )
-    video_group.add_argument(
-        "--fps",
-        type=int,
-        default=60,
-        help="Frames per second for the output video.",
-    )
-
-    parser.set_defaults(**config_defaults)
+    if algo_key:
+        add_dataclass_args(ALGORITHM_REGISTRY[algo_key].config)
 
     return parser.parse_args(args)
 
@@ -218,17 +85,11 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 def main(
     algo_key: str,
     batch_size: int,
+    renderer_config: RendererConfig,
     master_seed: int | None = None,
     image_filepath: str | None = None,
-    background_image: str | None = None,
     unlocked_parameters: list[str] | None = None,
     locked_parameters: dict[str, Any] | None = None,
-    to_video: bool = False,
-    duration: float = 30.0,
-    fps: int = 60,
-    blur_radius: int = 0,
-    blur_sigma: float = 0.0,
-    scaling_factor: int = 1,
 ):
 
     target_factory = ALGORITHM_REGISTRY[algo_key].factory
@@ -256,32 +117,15 @@ def main(
     if locked_params:
         configs = [replace(config, **locked_params) for config in configs]
 
-    engine_config: dict[str, Any] = {
-        "algorithm": algo_key,
-        "master_seed": master_seed,
-        "batch_size": batch_size,
-        "background_image": background_image,
-        "to_video": to_video,
-        "duration": duration,
-        "fps": fps,
-        "blur_radius": blur_radius,
-        "blur_sigma": blur_sigma,
-        "scaling_factor": scaling_factor,
-    }
+    engine_config: dict[str, Any] = {"algorithm": algo_key, "master_seed": master_seed, "batch_size": batch_size, **asdict(renderer_config)}
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = executor.map(
             target_runner,
             tasks,
             configs,
-            repeat(to_video),
-            repeat(duration),
-            repeat(fps),
+            repeat(renderer_config),
             repeat(batch_directory),
-            repeat(background_image),
-            repeat(blur_radius),
-            repeat(blur_sigma),
-            repeat(scaling_factor),
             repeat(engine_config),
         )
         list(results)
@@ -354,18 +198,17 @@ if __name__ == "__main__":
         exit(0)
 
     locked_parameters = extract_locks(parsed_args, algo_key)
+
+    args_dict = vars(parsed_args)
+    renderer_kwargs = {f.name: args_dict[f.name] for f in fields(RendererConfig) if f.name in args_dict}
+    renderer_config = RendererConfig(**renderer_kwargs)
+
     main(
         algo_key=algo_key,
         batch_size=parsed_args.batch_size,
+        renderer_config=renderer_config,
         master_seed=parsed_args.master_seed,
         image_filepath=parsed_args.image,
-        background_image=parsed_args.background_image,
         unlocked_parameters=parsed_args.unlock,
         locked_parameters=locked_parameters,
-        to_video=parsed_args.to_video,
-        duration=parsed_args.duration,
-        fps=parsed_args.fps,
-        blur_radius=parsed_args.blur_radius,
-        blur_sigma=parsed_args.blur_sigma,
-        scaling_factor=parsed_args.scaling_factor,
     )

@@ -4,6 +4,22 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
+from dataclasses import dataclass
+
+
+@dataclass(kw_only=True)
+class RendererConfig:
+    to_video: bool = False
+    duration: float = 30.0
+    fps: int = 60
+    background_image: str | None = None
+    norm_method: int = 0
+    norm_power: float = 1.0
+    sig_steepness: float = 1.0
+    sig_midpoint: float = 0.5
+    blur_radius: int = 0
+    blur_sigma: float = 0.0
+    scaling_factor: int = 10
 
 
 @njit(cache=True)  # type: ignore
@@ -77,16 +93,6 @@ def apply_shader(
             else:
                 for c in range(chans):
                     out[y, x, c] = background_color[c]
-
-
-from numba import njit  # type: ignore
-import numpy as np
-from numpy.typing import NDArray
-
-
-from numba import njit  # type: ignore
-import numpy as np
-from numpy.typing import NDArray
 
 
 @njit(fastmath=True, cache=True)  # type: ignore

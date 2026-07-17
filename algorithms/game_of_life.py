@@ -3,6 +3,7 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
 from typing import Callable, Any, ClassVar
+from renderer import RendererConfig
 from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
@@ -10,7 +11,7 @@ from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, ru
 class GameOfLifeConfig(AlgorithmBaseConfig):
     iterations: int
     simulation_seed: int
-    seed_amount: int
+    living_ratio: float
 
     def __post_init__(self):
         super().__post_init__()
@@ -23,7 +24,7 @@ class GameOfLifeFactory(AlgorithmBaseFactory):
     _GAME_OF_LIFE_RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = {
         "iterations": lambda rng: int(rng.integers(10, 250)),
         "simulation_seed": lambda rng: int(rng.integers(0, 4294967296)),
-        "seed_amount": lambda rng: int(rng.integers(5000, 500000)),
+        "living_ratio": lambda rng: float(rng.uniform(0.1, 0.9)),
     }
 
     _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = AlgorithmBaseFactory._RULES | _GAME_OF_LIFE_RULES
@@ -31,27 +32,21 @@ class GameOfLifeFactory(AlgorithmBaseFactory):
 
 def run_game_of_life(
     i: int,
-    config: GameOfLifeConfig,
-    to_video: bool,
-    duration: float,
-    fps: int,
+    algorithm_config: GameOfLifeConfig,
+    renderer_config: RendererConfig,
     batch_directory: str,
-    background_image: str | None,
-    blur_radius: int,
-    blur_sigma: float,
-    scaling_factor: int,
     engine_config: dict[str, Any],
 ):
     def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
         return game_of_life(
             task_rng,
             canvas,
-            config.iterations,
-            config.seed_amount,
+            algorithm_config.iterations,
+            algorithm_config.living_ratio,
             capture_interval,
         )
 
-    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, scaling_factor, engine_config, build_generator)
+    run_algorithm(i, algorithm_config, renderer_config, batch_directory, engine_config, build_generator)
 
 
 @njit(cache=True)  # type: ignore
@@ -59,13 +54,15 @@ def game_of_life(
     rng: np.random.Generator,
     canvas: NDArray[np.uint32],
     iterations: int,
-    seed_amount: int,
+    living_ratio: float,
     capture_interval: int,
 ):
     height = canvas.shape[0]
     width = canvas.shape[1]
 
-    for _ in range(seed_amount):
+    inital_alive = int(height * width * living_ratio)
+
+    for _ in range(inital_alive):
         sy = rng.integers(0, height)  # type: ignore
         sx = rng.integers(0, width)  # type: ignore
         canvas[sy, sx] = 1
