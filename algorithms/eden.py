@@ -97,7 +97,7 @@ def eden(
     width = canvas.shape[1]
 
     max_candidates = height * width
-    candidates = np.empty((max_candidates, 2), dtype=np.int32)
+    candidates = np.zeros((max_candidates, 2), dtype=np.int32)
     num_candidates = 0
     perimeter = build_perimeter(perimeter_size, perimeter_filled)
 
@@ -167,7 +167,7 @@ def eden(
                 if bias == 5:
                     filled_neighbors = density_map[cy, cx]
                     density = filled_neighbors / max_neighbors
-                    fitness = (1.0 - density) ** bias_power
+                    fitness = (1.0 - density) ** int(bias_power)
                 else:
                     fitness = static_fitness_map[cy, cx]
 

@@ -15,6 +15,7 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - Setting -i scaling_factor is not inherited
     - Improve how RendererConfig is constructed in __name__ block
     - Implement reduced argparser from Gemini?"
     - Should RendererConfig really be repeated? Or randomize and 1 per AlgorithmConfig?

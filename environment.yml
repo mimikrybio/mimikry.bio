@@ -1,4 +1,4 @@
-name: Mimicry
+name: Mimikry
 channels:
   - conda-forge
   - nodefaults
