@@ -3,4 +3,4 @@ __pycache__/
 .DS_Store
 archive/
 batch_*/
-*_config.json
+*config.json

@@ -13,7 +13,7 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
-    - Height and width parameters should describe final image, scaling_factor as divisor
+    - seed_amount as fraction of total pixels, not absolute value
     - Independent scaling for height and width
     - Why is fps parameter not transfered from --image flag?
     - How to handle different image dimension during layering?
