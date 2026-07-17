@@ -5,10 +5,13 @@ from typing import Callable, Any, ClassVar, Type, Generator
 import os
 from PIL import Image
 import renderer
+import math
 
 
 @dataclass(kw_only=True)
 class AlgorithmBaseConfig:
+    height: int
+    width: int
     norm_method: int
     norm_power: float
     sig_steepness: float
@@ -52,7 +55,16 @@ class AlgorithmBaseConfig:
 
 class AlgorithmBaseFactory:
     _CONFIG_CLASS: ClassVar[Type[Any]]
-    _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]]
+    _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = {
+        "height": lambda rng: int(rng.integers(250, 1001)) & ~1,
+        "width": lambda rng: int(rng.integers(250, 1001)) & ~1,
+        "norm_method": lambda rng: int(rng.integers(0, 4)),
+        "norm_power": lambda rng: float(rng.uniform(0.5, 2.5)),
+        "sig_steepness": lambda rng: float(rng.uniform(1.0, 10.0)),
+        "sig_midpoint": lambda rng: float(rng.uniform(0.1, 0.9)),
+        "color_palette": lambda rng: str(rng.choice(list(AlgorithmBaseConfig.COLOR_PALETTES.keys()))),
+        "background_color": lambda rng: str(rng.choice(list(AlgorithmBaseConfig.BG_COLORS.keys()))),
+    }
 
     @classmethod
     def generate_random(cls, rng: np.random.Generator) -> Any:
@@ -75,14 +87,18 @@ def run_algorithm(
     background_image: str | None,
     blur_radius: int,
     blur_sigma: float,
+    scaling_factor: int,
     engine_config: dict[str, Any],
     generator_factory: Callable[[np.random.Generator, np.ndarray, int], Generator[int, None, None]],
 ):
+    nearest_common_divisor = get_nearest_common_divisor(config.height, config.width, scaling_factor)
+    scaled_height = int(config.height / nearest_common_divisor)
+    scaled_width = int(config.width / nearest_common_divisor)
     task_rng = np.random.default_rng(config.simulation_seed)
-    canvas = np.zeros((config.height, config.width), dtype=np.uint32)
+    canvas = np.zeros((scaled_height, scaled_width), dtype=np.uint32)
     color_palette = config.get_palette_array()
     background_color = config.get_background_array()
-    color_buffer = np.zeros((config.height, config.width, color_palette.shape[1]), dtype=np.uint8)
+    color_buffer = np.zeros((scaled_height, scaled_width, color_palette.shape[1]), dtype=np.uint8)
 
     background_array = None
     if background_image:
@@ -96,7 +112,7 @@ def run_algorithm(
         total_frames = int(duration * fps)
         capture_interval = max(1, config.iterations // total_frames)
         output_filepath = os.path.join(batch_directory, f"{i:04d}.mp4")
-        process = renderer.initialize_video_stream(config.width * 1, config.height * 1, fps, output_filepath)
+        process = renderer.initialize_video_stream(config.width, config.height, fps, output_filepath)
 
     algorithm_generator = generator_factory(task_rng, canvas, capture_interval)
 
@@ -111,7 +127,7 @@ def run_algorithm(
             )
             renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
             blurred_buffer = renderer.apply_gaussian_blur(color_buffer, blur_radius, blur_sigma)
-            scaled_buffer = renderer.apply_scaling(blurred_buffer, 1)
+            scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
             out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
             process.stdin.write(out_buffer.tobytes())  # type: ignore
 
@@ -129,9 +145,24 @@ def run_algorithm(
 
         renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
         blurred_buffer = renderer.apply_gaussian_blur(color_buffer, blur_radius, blur_sigma)
-        scaled_buffer = renderer.apply_scaling(blurred_buffer, 1)
+        scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
         out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
 
         unified_config = {"engine": engine_config, "algorithm": asdict(config)}
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
         renderer.save_static_image(output_filepath, out_buffer, json.dumps(unified_config))
+
+
+def get_nearest_common_divisor(height: int, width: int, suggested_scale: int) -> int:
+    gcd_val = math.gcd(height, width)
+
+    divisors: list[int] = []
+    for i in range(1, int(math.isqrt(gcd_val)) + 1):
+        if gcd_val % i == 0:
+            divisors.append(i)
+            if i != gcd_val // i:
+                divisors.append(gcd_val // i)
+
+    nearest_divisor = min(divisors, key=lambda d: abs(d - suggested_scale))
+
+    return nearest_divisor

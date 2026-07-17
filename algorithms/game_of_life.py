@@ -2,14 +2,12 @@ import numpy as np
 from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
-from typing import Any
+from typing import Callable, Any, ClassVar
 from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
 @dataclass
 class GameOfLifeConfig(AlgorithmBaseConfig):
-    height: int
-    width: int
     iterations: int
     simulation_seed: int
     seed_amount: int
@@ -22,19 +20,13 @@ class GameOfLifeConfig(AlgorithmBaseConfig):
 
 class GameOfLifeFactory(AlgorithmBaseFactory):
     _CONFIG_CLASS = GameOfLifeConfig
-    _RULES = {
-        "height": lambda rng: int(rng.integers(250, 1001)) * 2,
-        "width": lambda rng: int(rng.integers(250, 1001)) * 2,
-        "iterations": lambda rng: int(rng.integers(100, 1000)),
+    _GAME_OF_LIFE_RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = {
+        "iterations": lambda rng: int(rng.integers(10, 250)),
         "simulation_seed": lambda rng: int(rng.integers(0, 4294967296)),
-        "seed_amount": lambda rng: int(rng.integers(1, 11)),
-        "norm_method": lambda rng: int(rng.integers(0, 4)),
-        "norm_power": lambda rng: float(rng.uniform(0.5, 2.5)),
-        "sig_steepness": lambda rng: float(rng.uniform(1.0, 10.0)),
-        "sig_midpoint": lambda rng: float(rng.uniform(0.1, 0.9)),
-        "color_palette": lambda rng: str(rng.choice(list(GameOfLifeConfig.COLOR_PALETTES.keys()))),
-        "background_color": lambda rng: str(rng.choice(list(GameOfLifeConfig.BG_COLORS.keys()))),
+        "seed_amount": lambda rng: int(rng.integers(5000, 500000)),
     }
+
+    _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = AlgorithmBaseFactory._RULES | _GAME_OF_LIFE_RULES
 
 
 def run_game_of_life(
@@ -47,6 +39,7 @@ def run_game_of_life(
     background_image: str | None,
     blur_radius: int,
     blur_sigma: float,
+    scaling_factor: int,
     engine_config: dict[str, Any],
 ):
     def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
@@ -58,7 +51,7 @@ def run_game_of_life(
             capture_interval,
         )
 
-    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, engine_config, build_generator)
+    run_algorithm(i, config, to_video, duration, fps, batch_directory, background_image, blur_radius, blur_sigma, scaling_factor, engine_config, build_generator)
 
 
 @njit(cache=True)  # type: ignore

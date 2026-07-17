@@ -1,0 +1,26 @@
+{
+    "engine": {
+        "algorithm": "game_of_life",
+        "master_seed": null,
+        "batch_size": 1,
+        "background_image": null,
+        "to_video": false,
+        "duration": 20.0,
+        "fps": 3,
+        "blur_radius": 0,
+        "blur_sigma": 0.0
+    },
+    "algorithm": {
+        "norm_method": 0,
+        "norm_power": 0.8349909247996585,
+        "sig_steepness": 1.51884847343295,
+        "sig_midpoint": 0.37099119368214095,
+        "color_palette": "grayscale",
+        "background_color": "black",
+        "height": 128,
+        "width": 72,
+        "iterations": 60,
+        "simulation_seed": null,
+        "seed_amount": 5000
+    }
+}

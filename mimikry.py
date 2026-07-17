@@ -13,13 +13,12 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
-    - Turn scaling magic number into parameter
+    - Height and width parameters should describe final image, scaling_factor as divisor
+    - Independent scaling for height and width
     - Why is fps parameter not transfered from --image flag?
     - How to handle different image dimension during layering?
-    - Config arguments that are algorithm agnostic should be in "engine"
     - Max_neighborhood weirdness causes tournament to spawn seed at 0,0
-    - Iterations must be compatible with fps and duration? Animation cutoff...
-    - Add game of life algorithm
+    - Interaction between fps and duration parameters is unintuitive. Refactor.
     - Add non-linear video time
     - Add video start, where prompt is typed
     - Add linger to end of video
@@ -158,6 +157,13 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Sigma for the Gaussian blur. A value of 0.0 auto-calculates the sigma based on the radius.",
     )
 
+    render_group.add_argument(
+        "--scaling_factor",
+        type=int,
+        default=1,
+        help="Target scaling factor.",
+    )
+
     override_group = parser.add_argument_group(f"{algo_key.capitalize()} Parameter Overrides (Locks)")
 
     for f in fields(target_config):
@@ -222,6 +228,7 @@ def main(
     fps: int = 60,
     blur_radius: int = 0,
     blur_sigma: float = 0.0,
+    scaling_factor: int = 1,
 ):
 
     target_factory = ALGORITHM_REGISTRY[algo_key].factory
@@ -259,6 +266,7 @@ def main(
         "fps": fps,
         "blur_radius": blur_radius,
         "blur_sigma": blur_sigma,
+        "scaling_factor": scaling_factor,
     }
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -273,6 +281,7 @@ def main(
             repeat(background_image),
             repeat(blur_radius),
             repeat(blur_sigma),
+            repeat(scaling_factor),
             repeat(engine_config),
         )
         list(results)
@@ -358,4 +367,5 @@ if __name__ == "__main__":
         fps=parsed_args.fps,
         blur_radius=parsed_args.blur_radius,
         blur_sigma=parsed_args.blur_sigma,
+        scaling_factor=parsed_args.scaling_factor,
     )

@@ -2,14 +2,12 @@ import numpy as np
 from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
-from typing import Any
+from typing import Callable, Any, ClassVar
 from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
 
 
 @dataclass
 class EdenConfig(AlgorithmBaseConfig):
-    height: int
-    width: int
     iterations: int
     simulation_seed: int
     seed_amount: int
@@ -34,9 +32,7 @@ class EdenConfig(AlgorithmBaseConfig):
 
 class EdenFactory(AlgorithmBaseFactory):
     _CONFIG_CLASS = EdenConfig
-    _RULES = {
-        "height": lambda rng: int(rng.integers(250, 1001)) * 2,
-        "width": lambda rng: int(rng.integers(250, 1001)) * 2,
+    _EDEN_RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = {
         "iterations": lambda rng: int(rng.integers(1000000, 2000000)),
         "simulation_seed": lambda rng: int(rng.integers(0, 4294967296)),
         "seed_amount": lambda rng: int(rng.integers(1, 11)),
@@ -48,13 +44,9 @@ class EdenFactory(AlgorithmBaseFactory):
         "minkowski_radius": lambda rng: int(rng.integers(1, 51)),
         "minkowski_power": lambda rng: float(rng.uniform(0.5, 5.0)),
         "tournament_size": lambda rng: int(rng.integers(2, 21)),
-        "norm_method": lambda rng: int(rng.integers(0, 4)),
-        "norm_power": lambda rng: float(rng.uniform(0.5, 2.5)),
-        "sig_steepness": lambda rng: float(rng.uniform(1.0, 10.0)),
-        "sig_midpoint": lambda rng: float(rng.uniform(0.1, 0.9)),
-        "color_palette": lambda rng: str(rng.choice(list(EdenConfig.COLOR_PALETTES.keys()))),
-        "background_color": lambda rng: str(rng.choice(list(EdenConfig.BG_COLORS.keys()))),
     }
+
+    _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = AlgorithmBaseFactory._RULES | _EDEN_RULES
 
 
 def run_eden(
