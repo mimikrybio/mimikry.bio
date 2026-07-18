@@ -12,8 +12,8 @@ from renderer import RendererConfig
 
 @dataclass(kw_only=True)
 class AlgorithmBaseConfig:
-    height: int
-    width: int
+    height: int = 1920
+    width: int = 1080
     color_palette: int = 0
     background_color: int = 0
 
@@ -134,7 +134,7 @@ def run_algorithm(
         scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
         out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
 
-        unified_config = {"engine": engine_config, "algorithm": asdict(algorithm_config)}
+        unified_config = {"engine": asdict(engine_config), "renderer": asdict(renderer_config), "algorithm": asdict(algorithm_config)}
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
         renderer.save_static_image(output_filepath, out_buffer, json.dumps(unified_config))
 

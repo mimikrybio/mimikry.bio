@@ -1,6 +1,6 @@
 import numpy as np
 import concurrent.futures
-from dataclasses import dataclass, fields, replace, asdict
+from dataclasses import dataclass, fields
 import json
 from typing import Any, Callable
 import argparse
@@ -15,15 +15,12 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
-    - Setting -i scaling_factor is not inherited
-    - Improve how RendererConfig is constructed in __name__ block
-    - Implement reduced argparser from Gemini?"
+    - Why is background color in algorithm config class?
+    - Where should EngineConfig live?
+    - reimplement locking and unlocking parameters
+    - boolen argument have "no-" version, why?
     - Should RendererConfig really be repeated? Or randomize and 1 per AlgorithmConfig?
-    - Bring metadata structure in line with configs used
-    - Engine config for top-level arguments?
-    - remove initial parser and make algorithm just another argument?
     - Independent scaling for height and width
-    - Why is fps parameter not transfered from --image flag?
     - How to handle different image dimension during layering?
     - Max_neighborhood weirdness causes tournament to spawn seed at 0,0
     - Interaction between fps and duration parameters is unintuitive. Refactor.
@@ -32,6 +29,17 @@ import algorithms.game_of_life as game_of_life
     - Add linger to end of video
     - Should color palettes be defined in renderer.py?
 """
+
+
+@dataclass(kw_only=True)
+class EngineConfig:
+    algorithm: str
+    config: str | None = None
+    batch_size: int = 1
+    master_seed: int | None = None
+    image: str | None = None
+    show_metadata: bool = False
+    unlock: list[str] | None = None
 
 
 @dataclass
@@ -61,7 +69,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(description="Mimikry Generative Art Engine")
     parser.add_argument("algorithm", type=str, choices=list(ALGORITHM_REGISTRY.keys()), nargs="?")
-    parser.add_argument("-c", "--config", type=str, default=None, help="Path to a JSON configuration file.")
+    parser.add_argument("-j", "--json", type=str, default=None, help="Path to a JSON configuration file.")
     parser.add_argument("-b", "--batch_size", type=int, default=1, help="Number of images to generate per execution.")
     parser.add_argument("-m", "--master_seed", type=int, default=None, help="Master seed for batch determinism.")
     parser.add_argument("-i", "--image", type=str, default=None, help="Path to a PNG file to load the base configuration from.")
@@ -83,48 +91,19 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def main(
-    algo_key: str,
-    batch_size: int,
-    renderer_config: RendererConfig,
-    master_seed: int | None = None,
-    image_filepath: str | None = None,
-    unlocked_parameters: list[str] | None = None,
-    locked_parameters: dict[str, Any] | None = None,
-):
+def main(engine_config: EngineConfig, renderer_config: RendererConfig, algorithm_configs: list[Any]):
+    target_runner = ALGORITHM_REGISTRY[engine_config.algorithm].runner
 
-    target_factory = ALGORITHM_REGISTRY[algo_key].factory
-    target_runner = ALGORITHM_REGISTRY[algo_key].runner
-
-    validate_execution(image_filepath, unlocked_parameters, batch_size)
-    tasks = range(batch_size)
-    locked_params = locked_parameters or {}
-
+    tasks = range(engine_config.batch_size)
     timestamp = datetime.now().strftime("%d%m%Y%H%M%S")
     batch_directory = f"batch_{timestamp}"
     os.makedirs(batch_directory, exist_ok=True)
-
-    master_rng = np.random.default_rng(master_seed)
-
-    if image_filepath:
-        base_config = load_image_config(image_filepath, algo_key)
-        if unlocked_parameters:
-            configs = [target_factory.unlock(base_config, master_rng, unlocked_parameters) for _ in range(batch_size)]
-        else:
-            configs = [base_config for _ in range(batch_size)]
-    else:
-        configs = [target_factory.generate_random(master_rng) for _ in range(batch_size)]
-
-    if locked_params:
-        configs = [replace(config, **locked_params) for config in configs]
-
-    engine_config: dict[str, Any] = {"algorithm": algo_key, "master_seed": master_seed, "batch_size": batch_size, **asdict(renderer_config)}
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = executor.map(
             target_runner,
             tasks,
-            configs,
+            algorithm_configs,
             repeat(renderer_config),
             repeat(batch_directory),
             repeat(engine_config),
@@ -163,17 +142,34 @@ def extract_locks(parsed_args: argparse.Namespace, algo_key: str) -> dict[str, A
     return locks
 
 
-def load_image_config(filepath: str, algo_key: str) -> Any:
+def load_configs(parsed_args: argparse.Namespace, algo_key: str):
     target_config = ALGORITHM_REGISTRY[algo_key].config
-    meta_key = "MimikryConfig"
+    target_factory = ALGORITHM_REGISTRY[algo_key].factory
 
-    with Image.open(filepath) as img:
-        metadata = img.info
+    image_engine_config, image_renderer_config, image_algorithm_config = {}, {}, {}
+    json_engine_config, json_renderer_config, json_algorithm_config = {}, {}, {}
+    if parsed_args.image:
+        with Image.open(parsed_args.image) as image:
+            image_full_config = json.loads(image.info.get("MimikryConfig", "{}"))
+            image_engine_config = image_full_config.get("engine", {})
+            image_renderer_config = image_full_config.get("renderer", {})
+            image_algorithm_config = image_full_config.get("algorithm", {})
+            algorithm_configs = [target_config(**image_algorithm_config) for _ in range(image_engine_config["batch_size"])]
+            return EngineConfig(**image_engine_config), RendererConfig(**image_renderer_config), algorithm_configs
 
-    full_config = json.loads(metadata[meta_key])
+    elif parsed_args.json:
+        with open(parsed_args.json) as file:
+            json_full_config = json.load(file)
+            json_engine_config = json_full_config.get("engine", {})
+            json_renderer_config = json_full_config.get("renderer", {})
+            json_algorithm_config = json_full_config.get("algorithm", {})
+            algorithm_configs = [target_config(**json_algorithm_config) for _ in range(json_engine_config["batch_size"])]
+            return EngineConfig(**json_engine_config), RendererConfig(**json_renderer_config), algorithm_configs
 
-    algo_config = full_config["algorithm"]
-    return target_config(**algo_config)
+    else:
+        rng = np.random.default_rng(parsed_args.master_seed)
+        algorithm_configs = [target_factory.generate_random(rng) for _ in range(parsed_args.batch_size)]
+        return EngineConfig(algorithm=algo_key), RendererConfig(), algorithm_configs
 
 
 def show_metadata(filepath: str) -> None:
@@ -185,31 +181,12 @@ def show_metadata(filepath: str) -> None:
     print(json.dumps(json.loads(metadata[meta_key]), indent=4))
 
 
-def validate_execution(image_filepath: str | None, unlocked_parameters: list[str] | None, batch_size: int) -> None:
-    if image_filepath and not unlocked_parameters and batch_size > 1:
-        raise ValueError("Cannot generate a batch > 1 from a parent image without unlocking parameters to prevent redundant processing.")
-
-
 if __name__ == "__main__":
     parsed_args = parse_args()
-    algo_key = parsed_args.algorithm
-
     if parsed_args.show_metadata and parsed_args.image:
         show_metadata(parsed_args.image)
         exit(0)
 
-    locked_parameters = extract_locks(parsed_args, algo_key)
-
-    args_dict = vars(parsed_args)
-    renderer_kwargs = {f.name: args_dict[f.name] for f in fields(RendererConfig) if f.name in args_dict}
-    renderer_config = RendererConfig(**renderer_kwargs)
-
-    main(
-        algo_key=algo_key,
-        batch_size=parsed_args.batch_size,
-        renderer_config=renderer_config,
-        master_seed=parsed_args.master_seed,
-        image_filepath=parsed_args.image,
-        unlocked_parameters=parsed_args.unlock,
-        locked_parameters=locked_parameters,
-    )
+    algo_key = parsed_args.algorithm
+    engine_config, renderer_config, algorithm_configs = load_configs(parsed_args=parsed_args, algo_key=algo_key)
+    main(engine_config=engine_config, renderer_config=renderer_config, algorithm_configs=algorithm_configs)
