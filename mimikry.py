@@ -1,6 +1,6 @@
 import numpy as np
 import concurrent.futures
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import json
 from typing import Any, Callable
 import argparse
@@ -17,8 +17,7 @@ import algorithms.game_of_life as game_of_life
 """ ToDo's
     - Why is background color in algorithm config class?
     - Where should EngineConfig live?
-    - reimplement locking and unlocking parameters
-    - boolen argument have "no-" version, why?
+    - reimplement unlocking parameters
     - Should RendererConfig really be repeated? Or randomize and 1 per AlgorithmConfig?
     - Independent scaling for height and width
     - How to handle different image dimension during layering?
@@ -73,13 +72,13 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-b", "--batch_size", type=int, default=1, help="Number of images to generate per execution.")
     parser.add_argument("-m", "--master_seed", type=int, default=None, help="Master seed for batch determinism.")
     parser.add_argument("-i", "--image", type=str, default=None, help="Path to a PNG file to load the base configuration from.")
-    parser.add_argument("--show_metadata", action="store_true", help="Print the configuration metadata of the provided --image and exit.")
+    parser.add_argument("--show_metadata", action="store_true", default=None, help="Print the configuration metadata of the provided --image and exit.")
     parser.add_argument("-u", "--unlock", nargs="+", type=str, default=None, help="Parameters to unlock for mutation (e.g., -u bias).")
 
     def add_dataclass_args(dataclass_type: Any):
         for f in fields(dataclass_type):
             if f.type is bool:
-                parser.add_argument(f"--{f.name}", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
+                parser.add_argument(f"--{f.name}", action="store_true", default=None)
             else:
                 parser.add_argument(f"--{f.name}", type=f.type if f.type in [int, float, str] else str, default=argparse.SUPPRESS)
 
@@ -111,31 +110,18 @@ def main(engine_config: EngineConfig, renderer_config: RendererConfig, algorithm
         list(results)
 
 
-def extract_locks(parsed_args: argparse.Namespace, algo_key: str) -> dict[str, Any]:
-    target_config = ALGORITHM_REGISTRY[algo_key].config
+def extract_locks(parsed_args: argparse.Namespace, config_class: type) -> dict[str, Any]:
     locks: dict[str, Any] = {}
-    for f in fields(target_config):
+
+    for f in fields(config_class):
         raw_value = getattr(parsed_args, f.name, None)
         if raw_value is None:
             continue
 
-        if f.type is int:
-            locks[f.name] = int(raw_value)
-        elif f.type is float:
-            locks[f.name] = float(raw_value)
-        elif f.type is str:
-            locks[f.name] = str(raw_value)
+        if f.type in (int, float, str):
+            locks[f.name] = f.type(raw_value)
         elif f.type is bool:
-            if isinstance(raw_value, bool):
-                locks[f.name] = raw_value
-            else:
-                val_lower = str(raw_value).lower()
-                if val_lower == "true":
-                    locks[f.name] = True
-                elif val_lower == "false":
-                    locks[f.name] = False
-                else:
-                    raise ValueError(f"Invalid boolean value for --{f.name}: '{raw_value}'. " "Expected 'True' or 'False'.")
+            locks[f.name] = raw_value
         else:
             raise NotImplementedError(f"CLI parsing for field '{f.name}' of type {f.type} is not yet implemented.")
 
@@ -146,14 +132,21 @@ def load_configs(parsed_args: argparse.Namespace, algo_key: str):
     target_config = ALGORITHM_REGISTRY[algo_key].config
     target_factory = ALGORITHM_REGISTRY[algo_key].factory
 
+    engine_config_locks = extract_locks(parsed_args, EngineConfig)
+    renderer_config_locks = extract_locks(parsed_args, RendererConfig)
+    algorithm_config_locks = extract_locks(parsed_args, target_config)
+
     image_engine_config, image_renderer_config, image_algorithm_config = {}, {}, {}
     json_engine_config, json_renderer_config, json_algorithm_config = {}, {}, {}
     if parsed_args.image:
         with Image.open(parsed_args.image) as image:
             image_full_config = json.loads(image.info.get("MimikryConfig", "{}"))
             image_engine_config = image_full_config.get("engine", {})
+            image_engine_config.update(engine_config_locks)
             image_renderer_config = image_full_config.get("renderer", {})
+            image_renderer_config.update(renderer_config_locks)
             image_algorithm_config = image_full_config.get("algorithm", {})
+            image_algorithm_config.update(algorithm_config_locks)
             algorithm_configs = [target_config(**image_algorithm_config) for _ in range(image_engine_config["batch_size"])]
             return EngineConfig(**image_engine_config), RendererConfig(**image_renderer_config), algorithm_configs
 
@@ -161,14 +154,18 @@ def load_configs(parsed_args: argparse.Namespace, algo_key: str):
         with open(parsed_args.json) as file:
             json_full_config = json.load(file)
             json_engine_config = json_full_config.get("engine", {})
+            json_engine_config.update(engine_config_locks)
             json_renderer_config = json_full_config.get("renderer", {})
+            json_renderer_config.update(renderer_config_locks)
             json_algorithm_config = json_full_config.get("algorithm", {})
+            json_algorithm_config.update(algorithm_config_locks)
             algorithm_configs = [target_config(**json_algorithm_config) for _ in range(json_engine_config["batch_size"])]
             return EngineConfig(**json_engine_config), RendererConfig(**json_renderer_config), algorithm_configs
 
     else:
         rng = np.random.default_rng(parsed_args.master_seed)
         algorithm_configs = [target_factory.generate_random(rng) for _ in range(parsed_args.batch_size)]
+        algorithm_configs = [replace(config, **algorithm_config_locks) for config in algorithm_configs]
         return EngineConfig(algorithm=algo_key), RendererConfig(), algorithm_configs
 
 
