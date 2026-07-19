@@ -3,8 +3,8 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from dataclasses import dataclass
 from typing import Callable, Any, ClassVar
-from renderer import RendererConfig
-from algorithms.base_config import AlgorithmBaseConfig, AlgorithmBaseFactory, run_algorithm
+from algorithms.config_resolver import EngineConfig, RendererConfig, AlgorithmBaseConfig, AlgorithmBaseFactory
+from algorithms.base_config import run_algorithm
 
 
 @dataclass
@@ -55,7 +55,7 @@ def run_eden(
     algorithm_config: EdenConfig,
     renderer_config: RendererConfig,
     batch_directory: str,
-    engine_config: dict[str, Any],
+    engine_config: EngineConfig,
 ):
     def build_generator(task_rng: np.random.Generator, canvas: np.ndarray, capture_interval: int):
         return eden(

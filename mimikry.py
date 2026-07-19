@@ -1,6 +1,5 @@
-import numpy as np
 import concurrent.futures
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 import json
 from typing import Any, Callable
 import argparse
@@ -10,14 +9,16 @@ import os
 from datetime import datetime
 import sys
 
-from renderer import RendererConfig
+from algorithms.config_resolver import EngineConfig, RendererConfig, load_configs
 import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - save metadata in videos
+    - decouple background color from apply_shader, layering before background color
+    - switch to blur after layering
+    - config_resolver.py and base_config should not be in algorithm directory
     - Why is background color in algorithm config class?
-    - Where should EngineConfig live?
-    - reimplement unlocking parameters
     - Should RendererConfig really be repeated? Or randomize and 1 per AlgorithmConfig?
     - Independent scaling for height and width
     - How to handle different image dimension during layering?
@@ -28,17 +29,6 @@ import algorithms.game_of_life as game_of_life
     - Add linger to end of video
     - Should color palettes be defined in renderer.py?
 """
-
-
-@dataclass(kw_only=True)
-class EngineConfig:
-    algorithm: str
-    config: str | None = None
-    batch_size: int = 1
-    master_seed: int | None = None
-    image: str | None = None
-    show_metadata: bool = False
-    unlock: list[str] | None = None
 
 
 @dataclass
@@ -110,65 +100,6 @@ def main(engine_config: EngineConfig, renderer_config: RendererConfig, algorithm
         list(results)
 
 
-def extract_locks(parsed_args: argparse.Namespace, config_class: type) -> dict[str, Any]:
-    locks: dict[str, Any] = {}
-
-    for f in fields(config_class):
-        raw_value = getattr(parsed_args, f.name, None)
-        if raw_value is None:
-            continue
-
-        if f.type in (int, float, str):
-            locks[f.name] = f.type(raw_value)
-        elif f.type is bool:
-            locks[f.name] = raw_value
-        else:
-            raise NotImplementedError(f"CLI parsing for field '{f.name}' of type {f.type} is not yet implemented.")
-
-    return locks
-
-
-def load_configs(parsed_args: argparse.Namespace, algo_key: str):
-    target_config = ALGORITHM_REGISTRY[algo_key].config
-    target_factory = ALGORITHM_REGISTRY[algo_key].factory
-
-    engine_config_locks = extract_locks(parsed_args, EngineConfig)
-    renderer_config_locks = extract_locks(parsed_args, RendererConfig)
-    algorithm_config_locks = extract_locks(parsed_args, target_config)
-
-    image_engine_config, image_renderer_config, image_algorithm_config = {}, {}, {}
-    json_engine_config, json_renderer_config, json_algorithm_config = {}, {}, {}
-    if parsed_args.image:
-        with Image.open(parsed_args.image) as image:
-            image_full_config = json.loads(image.info.get("MimikryConfig", "{}"))
-            image_engine_config = image_full_config.get("engine", {})
-            image_engine_config.update(engine_config_locks)
-            image_renderer_config = image_full_config.get("renderer", {})
-            image_renderer_config.update(renderer_config_locks)
-            image_algorithm_config = image_full_config.get("algorithm", {})
-            image_algorithm_config.update(algorithm_config_locks)
-            algorithm_configs = [target_config(**image_algorithm_config) for _ in range(image_engine_config["batch_size"])]
-            return EngineConfig(**image_engine_config), RendererConfig(**image_renderer_config), algorithm_configs
-
-    elif parsed_args.json:
-        with open(parsed_args.json) as file:
-            json_full_config = json.load(file)
-            json_engine_config = json_full_config.get("engine", {})
-            json_engine_config.update(engine_config_locks)
-            json_renderer_config = json_full_config.get("renderer", {})
-            json_renderer_config.update(renderer_config_locks)
-            json_algorithm_config = json_full_config.get("algorithm", {})
-            json_algorithm_config.update(algorithm_config_locks)
-            algorithm_configs = [target_config(**json_algorithm_config) for _ in range(json_engine_config["batch_size"])]
-            return EngineConfig(**json_engine_config), RendererConfig(**json_renderer_config), algorithm_configs
-
-    else:
-        rng = np.random.default_rng(parsed_args.master_seed)
-        algorithm_configs = [target_factory.generate_random(rng) for _ in range(parsed_args.batch_size)]
-        algorithm_configs = [replace(config, **algorithm_config_locks) for config in algorithm_configs]
-        return EngineConfig(algorithm=algo_key), RendererConfig(), algorithm_configs
-
-
 def show_metadata(filepath: str) -> None:
     meta_key = "MimikryConfig"
 
@@ -185,5 +116,7 @@ if __name__ == "__main__":
         exit(0)
 
     algo_key = parsed_args.algorithm
-    engine_config, renderer_config, algorithm_configs = load_configs(parsed_args=parsed_args, algo_key=algo_key)
+    target_config = ALGORITHM_REGISTRY[algo_key].config
+    target_factory = ALGORITHM_REGISTRY[algo_key].factory
+    engine_config, renderer_config, algorithm_configs = load_configs(parsed_args=parsed_args, target_config=target_config, target_factory=target_factory)
     main(engine_config=engine_config, renderer_config=renderer_config, algorithm_configs=algorithm_configs)

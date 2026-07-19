@@ -1,72 +1,13 @@
 import numpy as np
-from dataclasses import dataclass, asdict, replace
+from dataclasses import asdict
 import json
-from typing import Callable, Any, ClassVar, Type, Generator
+from typing import Callable, Any, Generator
 import os
 from PIL import Image
 import renderer
 import math
 
-from renderer import RendererConfig
-
-
-@dataclass(kw_only=True)
-class AlgorithmBaseConfig:
-    height: int = 1920
-    width: int = 1080
-    color_palette: int = 0
-    background_color: int = 0
-
-    COLOR_PALETTES: ClassVar[tuple[list[list[int]], ...]] = (
-        [[0, 0, 0, 255], [255, 255, 255, 255]],
-        [[0, 0, 0, 255], [255, 0, 0, 255], [255, 255, 0, 255]],
-        [[0, 0, 50, 255], [0, 150, 255, 255], [200, 255, 255, 255]],
-        [[20, 0, 40, 255], [255, 0, 255, 255], [0, 255, 255, 255]],
-        [[10, 30, 15, 255], [0, 160, 70, 255], [215, 175, 55, 255]],
-        [[92, 64, 51, 255], [52, 199, 89, 255]],
-    )
-
-    BG_COLORS: ClassVar[tuple[list[int], ...]] = (
-        [0, 0, 0, 0],
-        [0, 0, 0, 255],
-        [255, 255, 255, 255],
-        [255, 255, 255, 0],
-    )
-
-    def __post_init__(self):
-        if not (0 <= self.color_palette < len(self.COLOR_PALETTES)):
-            raise ValueError(f"Fatal: Invalid palette index '{self.color_palette}'. " f"Valid options: 0-{len(self.COLOR_PALETTES) - 1}")
-        if not (0 <= self.background_color < len(self.BG_COLORS)):
-            raise ValueError(f"Fatal: Invalid background index '{self.background_color}'. " f"Valid options: 0-{len(self.BG_COLORS) - 1}")
-
-    def get_palette_array(self) -> np.ndarray:
-        return np.array(self.COLOR_PALETTES[self.color_palette], dtype=np.uint8)
-
-    def get_background_array(self) -> np.ndarray:
-        return np.array(self.BG_COLORS[self.background_color], dtype=np.uint8)
-
-    def to_json(self) -> str:
-        return json.dumps(asdict(self))
-
-
-class AlgorithmBaseFactory:
-    _CONFIG_CLASS: ClassVar[Type[Any]]
-    _RULES: ClassVar[dict[str, Callable[[np.random.Generator], Any]]] = {
-        "height": lambda rng: int(rng.integers(250, 1001)) & ~1,
-        "width": lambda rng: int(rng.integers(250, 1001)) & ~1,
-        "color_palette": lambda rng: int(rng.integers(6)),
-        "background_color": lambda rng: int(rng.integers(4)),
-    }
-
-    @classmethod
-    def generate_random(cls, rng: np.random.Generator) -> Any:
-        new_values = {key: rule(rng) for key, rule in cls._RULES.items()}
-        return cls._CONFIG_CLASS(**new_values)
-
-    @classmethod
-    def unlock(cls, base_config: Any, rng: np.random.Generator, unlocked_keys: list[str]) -> Any:
-        new_values = {key: cls._RULES[key](rng) for key in unlocked_keys}
-        return replace(base_config, **new_values)
+from algorithms.config_resolver import EngineConfig, RendererConfig
 
 
 def run_algorithm(
@@ -74,7 +15,7 @@ def run_algorithm(
     algorithm_config: Any,
     renderer_config: RendererConfig,
     batch_directory: str,
-    engine_config: dict[str, Any],
+    engine_config: EngineConfig,
     generator_factory: Callable[[np.random.Generator, np.ndarray, int], Generator[int, None, None]],
 ):
     nearest_common_divisor = get_nearest_common_divisor(algorithm_config.height, algorithm_config.width, renderer_config.scaling_factor)

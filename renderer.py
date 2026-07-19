@@ -4,22 +4,6 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
-from dataclasses import dataclass
-
-
-@dataclass(kw_only=True)
-class RendererConfig:
-    to_video: bool = False
-    duration: float = 30.0
-    fps: int = 60
-    background_image: str | None = None
-    norm_method: int = 0
-    norm_power: float = 1.0
-    sig_steepness: float = 1.0
-    sig_midpoint: float = 0.5
-    blur_radius: int = 0
-    blur_sigma: float = 0.0
-    scaling_factor: int = 10
 
 
 @njit(cache=True)  # type: ignore
@@ -183,9 +167,15 @@ def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uin
     for y in range(h):
         for x in range(w):
             if fg[y, x, 3] != 0:
-                for ch in range(c):
-                    val = int(fg[y, x, ch]) + int(bg[y, x, ch])
-                    out[y, x, ch] = val // 2
+                if bg[y, x, 3] != 0:
+                    for ch in range(c):
+                        val = int(fg[y, x, ch]) + int(bg[y, x, ch])
+                        if ch == 3:
+                            out[y, x, ch] = 255
+                        else:
+                            out[y, x, ch] = val // 2
+                else:
+                    out[y, x] = fg[y, x]
 
     return out
 
