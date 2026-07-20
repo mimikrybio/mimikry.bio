@@ -4,6 +4,8 @@ from numpy.typing import NDArray
 from numba import njit  # type: ignore
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
+from typing import Any
+import json
 
 
 @njit(cache=True)  # type: ignore
@@ -186,7 +188,7 @@ def save_static_image(filepath: str, color_buffer: NDArray[np.uint8], unified_js
     Image.fromarray(color_buffer, mode="RGBA").save(filepath, pnginfo=meta_data)
 
 
-def initialize_video_stream(width: int, height: int, fps: int, output_filepath: str) -> subprocess.Popen[bytes]:
+def initialize_video_stream(unified_config: dict[str, Any], output_filepath: str) -> subprocess.Popen[bytes]:
     cmd = [
         "ffmpeg",
         "-y",
@@ -195,9 +197,9 @@ def initialize_video_stream(width: int, height: int, fps: int, output_filepath: 
         "-pixel_format",
         "rgba",
         "-video_size",
-        f"{width}x{height}",
+        f"{unified_config["algorithm"]["width"]}x{unified_config["algorithm"]["height"]}",
         "-framerate",
-        str(fps),
+        str(unified_config["renderer"]["fps"]),
         "-i",
         "-",
         "-c:v",
@@ -208,6 +210,8 @@ def initialize_video_stream(width: int, height: int, fps: int, output_filepath: 
         "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-crf",
         "18",
+        "-metadata",
+        f"MimikryConfig={json.dumps(unified_config)}",
         output_filepath,
     ]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE)

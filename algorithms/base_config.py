@@ -18,6 +18,8 @@ def run_algorithm(
     engine_config: EngineConfig,
     generator_factory: Callable[[np.random.Generator, np.ndarray, int], Generator[int, None, None]],
 ):
+    unified_config = {"engine": asdict(engine_config), "renderer": asdict(renderer_config), "algorithm": asdict(algorithm_config)}
+
     nearest_common_divisor = get_nearest_common_divisor(algorithm_config.height, algorithm_config.width, renderer_config.scaling_factor)
     scaled_height = int(algorithm_config.height / nearest_common_divisor)
     scaled_width = int(algorithm_config.width / nearest_common_divisor)
@@ -39,7 +41,7 @@ def run_algorithm(
         total_frames = int(renderer_config.duration * renderer_config.fps)
         capture_interval = max(1, algorithm_config.iterations // total_frames)
         output_filepath = os.path.join(batch_directory, f"{i:04d}.mp4")
-        process = renderer.initialize_video_stream(algorithm_config.width, algorithm_config.height, renderer_config.fps, output_filepath)
+        process = renderer.initialize_video_stream(unified_config, output_filepath)
 
     algorithm_generator = generator_factory(task_rng, canvas, capture_interval)
 
@@ -75,7 +77,6 @@ def run_algorithm(
         scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
         out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
 
-        unified_config = {"engine": asdict(engine_config), "renderer": asdict(renderer_config), "algorithm": asdict(algorithm_config)}
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
         renderer.save_static_image(output_filepath, out_buffer, json.dumps(unified_config))
 

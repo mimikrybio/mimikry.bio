@@ -5,6 +5,7 @@ from typing import Any
 from typing import Callable, Any, ClassVar, Type
 import numpy as np
 from PIL import Image
+import subprocess
 
 
 @dataclass(kw_only=True)
@@ -118,7 +119,14 @@ def load_configs(parsed_args: argparse.Namespace, target_config: Any, target_fac
     base_renderer_config: dict[str, Any] = {}
     base_algorithm_config: dict[str, Any] = {}
 
-    if parsed_args.image:
+    if parsed_args.video:
+        result = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format_tags=description", "-of", "default=nw=1:nk=1", parsed_args.video], capture_output=True, text=True)
+        full_config = json.loads(result.stdout.strip())
+        base_engine_config = full_config.get("engine", {})
+        base_renderer_config = full_config.get("renderer", {})
+        base_algorithm_config = full_config.get("algorithm", {})
+
+    elif parsed_args.image:
         with Image.open(parsed_args.image) as image:
             full_config = json.loads(image.info.get("MimikryConfig", "{}"))
             base_engine_config = full_config.get("engine", {})

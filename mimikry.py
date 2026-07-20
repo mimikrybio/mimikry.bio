@@ -8,13 +8,14 @@ from itertools import repeat
 import os
 from datetime import datetime
 import sys
+import subprocess
 
 from algorithms.config_resolver import EngineConfig, RendererConfig, load_configs
 import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
-    - save metadata in videos
+    - move show_metadata to config_resolver?
     - decouple background color from apply_shader, layering before background color
     - switch to blur after layering
     - config_resolver.py and base_config should not be in algorithm directory
@@ -62,6 +63,7 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-b", "--batch_size", type=int, default=1, help="Number of images to generate per execution.")
     parser.add_argument("-m", "--master_seed", type=int, default=None, help="Master seed for batch determinism.")
     parser.add_argument("-i", "--image", type=str, default=None, help="Path to a PNG file to load the base configuration from.")
+    parser.add_argument("-v", "--video", type=str, default=None, help="Path to a mp4 file to load the base configuration from.")
     parser.add_argument("--show_metadata", action="store_true", default=None, help="Print the configuration metadata of the provided --image and exit.")
     parser.add_argument("-u", "--unlock", nargs="+", type=str, default=None, help="Parameters to unlock for mutation (e.g., -u bias).")
 
@@ -103,6 +105,11 @@ def main(engine_config: EngineConfig, renderer_config: RendererConfig, algorithm
 def show_metadata(filepath: str) -> None:
     meta_key = "MimikryConfig"
 
+    if filepath.lower().endswith((".mp4", ".mkv", ".mov", ".webm")):
+        result = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format_tags=description", "-of", "default=nw=1:nk=1", filepath], capture_output=True, text=True)
+        print(json.dumps(json.loads(result.stdout.strip()), indent=4))
+        return
+
     with Image.open(filepath) as img:
         metadata = img.info
 
@@ -111,12 +118,14 @@ def show_metadata(filepath: str) -> None:
 
 if __name__ == "__main__":
     parsed_args = parse_args()
-    if parsed_args.show_metadata and parsed_args.image:
-        show_metadata(parsed_args.image)
-        exit(0)
-
-    algo_key = parsed_args.algorithm
-    target_config = ALGORITHM_REGISTRY[algo_key].config
-    target_factory = ALGORITHM_REGISTRY[algo_key].factory
-    engine_config, renderer_config, algorithm_configs = load_configs(parsed_args=parsed_args, target_config=target_config, target_factory=target_factory)
-    main(engine_config=engine_config, renderer_config=renderer_config, algorithm_configs=algorithm_configs)
+    if parsed_args.show_metadata:
+        if parsed_args.image:
+            show_metadata(parsed_args.image)
+        elif parsed_args.video:
+            show_metadata(parsed_args.video)
+    else:
+        algo_key = parsed_args.algorithm
+        target_config = ALGORITHM_REGISTRY[algo_key].config
+        target_factory = ALGORITHM_REGISTRY[algo_key].factory
+        engine_config, renderer_config, algorithm_configs = load_configs(parsed_args=parsed_args, target_config=target_config, target_factory=target_factory)
+        main(engine_config=engine_config, renderer_config=renderer_config, algorithm_configs=algorithm_configs)
