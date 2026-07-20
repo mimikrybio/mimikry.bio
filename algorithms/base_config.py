@@ -3,7 +3,6 @@ from dataclasses import asdict
 import json
 from typing import Callable, Any, Generator
 import os
-from PIL import Image
 import renderer
 import math
 
@@ -29,10 +28,10 @@ def run_algorithm(
     background_color = algorithm_config.get_background_array()
     color_buffer = np.zeros((scaled_height, scaled_width, color_palette.shape[1]), dtype=np.uint8)
 
-    background_array = None
-    if renderer_config.background_image:
-        with Image.open(renderer_config.background_image) as img:
-            background_array = np.array(img.convert("RGBA"), dtype=np.uint8)
+    # background_array = None
+    # if renderer_config.background_image:
+    #     with Image.open(renderer_config.background_image) as img:
+    #         background_array = np.array(img.convert("RGBA"), dtype=np.uint8)
 
     capture_interval = 0
     process = None
@@ -56,9 +55,9 @@ def run_algorithm(
             )
             renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
             blurred_buffer = renderer.apply_gaussian_blur(color_buffer, renderer_config.blur_radius, renderer_config.blur_sigma)
+            blurred_buffer = renderer.layer_images(color_buffer, blurred_buffer, background_color)
             scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
-            out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
-            process.stdin.write(out_buffer.tobytes())  # type: ignore
+            process.stdin.write(scaled_buffer.tobytes())  # type: ignore
 
     if renderer_config.to_video and process:
         process.stdin.close()  # type: ignore
@@ -74,11 +73,11 @@ def run_algorithm(
 
         renderer.apply_shader(norm_c, color_palette, background_color, color_buffer)
         blurred_buffer = renderer.apply_gaussian_blur(color_buffer, renderer_config.blur_radius, renderer_config.blur_sigma)
+        blurred_buffer = renderer.layer_images(color_buffer, blurred_buffer, background_color)
         scaled_buffer = renderer.apply_scaling(blurred_buffer, nearest_common_divisor)
-        out_buffer = renderer.layer_images(scaled_buffer, background_array) if background_array is not None else scaled_buffer
 
         output_filepath = os.path.join(batch_directory, f"{i:04d}.png")
-        renderer.save_static_image(output_filepath, out_buffer, json.dumps(unified_config))
+        renderer.save_static_image(output_filepath, scaled_buffer, json.dumps(unified_config))
 
 
 def get_nearest_common_divisor(height: int, width: int, suggested_scale: int) -> int:

@@ -15,6 +15,9 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - Multicore for a single video generation?
+    - come up with a flag for "blur stacking" in layer_images
+    - reimplement --background_image functionality
     - move show_metadata to config_resolver?
     - decouple background color from apply_shader, layering before background color
     - switch to blur after layering
@@ -107,6 +110,7 @@ def show_metadata(filepath: str) -> None:
 
     if filepath.lower().endswith((".mp4", ".mkv", ".mov", ".webm")):
         result = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format_tags=description", "-of", "default=nw=1:nk=1", filepath], capture_output=True, text=True)
+        print(result)
         print(json.dumps(json.loads(result.stdout.strip()), indent=4))
         return
 

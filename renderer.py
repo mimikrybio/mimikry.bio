@@ -162,23 +162,15 @@ def apply_scaling(img: NDArray[np.uint8], scaling_factor: float) -> NDArray[np.u
 
 
 @njit(fastmath=True, cache=True)  # type: ignore
-def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8]) -> NDArray[np.uint8]:
-    h, w, c = fg.shape
+def layer_images(fg: NDArray[np.uint8], bg: NDArray[np.uint8], background_color: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    h, w, _ = fg.shape
     out = np.zeros_like(fg)
-
     for y in range(h):
         for x in range(w):
-            if fg[y, x, 3] != 0:
-                if bg[y, x, 3] != 0:
-                    for ch in range(c):
-                        val = int(fg[y, x, ch]) + int(bg[y, x, ch])
-                        if ch == 3:
-                            out[y, x, ch] = 255
-                        else:
-                            out[y, x, ch] = val // 2
-                else:
-                    out[y, x] = fg[y, x]
-
+            if (fg[y, x] != background_color).any():
+                out[y, x] = fg[y, x]
+            else:
+                out[y, x] = bg[y, x]
     return out
 
 
