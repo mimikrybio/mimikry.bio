@@ -15,6 +15,7 @@ import algorithms.eden as eden
 import algorithms.game_of_life as game_of_life
 
 """ ToDo's
+    - Video metadata is sometimes not saved correctly, reason unknown.
     - Multicore for a single video generation?
     - come up with a flag for "blur stacking" in layer_images
     - reimplement --background_image functionality
